@@ -16,11 +16,11 @@ import (
 )
 
 type GeminiService struct {
-	client *providers.Client
+	client *providers.AccountPool
 	log    *zap.Logger
 }
 
-func NewGeminiService(client *providers.Client, log *zap.Logger) *GeminiService {
+func NewGeminiService(client *providers.AccountPool, log *zap.Logger) *GeminiService {
 	return &GeminiService{
 		client: client,
 		log:    log,
@@ -348,7 +348,7 @@ func (s *GeminiService) IsHealthy() bool {
 	return s.client.IsHealthy()
 }
 
-func (s *GeminiService) Client() *providers.Client {
+func (s *GeminiService) Client() *providers.AccountPool {
 	return s.client
 }
 

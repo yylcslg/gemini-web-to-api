@@ -22,11 +22,11 @@ import (
 var imagePlaceholderRegex = regexp.MustCompile(`(?i)https?://googleusercontent\.com/image_generation_content/\d+`)
 
 type OpenAIService struct {
-	client *providers.Client
+	client *providers.AccountPool
 	log    *zap.Logger
 }
 
-func NewOpenAIService(client *providers.Client, log *zap.Logger) *OpenAIService {
+func NewOpenAIService(client *providers.AccountPool, log *zap.Logger) *OpenAIService {
 	return &OpenAIService{
 		client: client,
 		log:    log,
@@ -207,7 +207,11 @@ func (s *OpenAIService) CreateImageGeneration(ctx context.Context, req dto.Image
 
 	data := make([]dto.ImageGenerationData, 0, n)
 	for len(data) < n {
-		response, err := s.client.GenerateContent(ctx, imagePrompt, opts...)
+		client := s.client.Pick()
+		if client == nil {
+			return nil, providers.ErrNoAvailableAccount
+		}
+		response, err := client.GenerateContent(ctx, imagePrompt, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -234,10 +238,15 @@ func (s *OpenAIService) CreateImageGeneration(ctx context.Context, req dto.Image
 				item.B64JSON = image.B64JSON
 			} else {
 				item.Thumbnail = image.URL
-				item.URL, err = s.client.ThumbnailToUrl(ctx, image.URL, response)
+				item.URL, err = client.ThumbnailToUrl(ctx, image.URL, response)
 				if err != nil {
 					s.log.Error("convert thumbnail to url failed", zap.Error(err))
 					item.URL = image.URL
+				}
+				if localURL, saveErr := providers.DownloadImageToLocal(ctx, client, item.URL); saveErr == nil {
+					item.URL = localURL
+				} else {
+					s.log.Warn("save generated image locally failed", zap.Error(saveErr))
 				}
 
 			}
@@ -361,6 +370,12 @@ func toOpenAIVideo(job providers.VideoJob, now time.Time) *dto.Video {
 		video.Error = &dto.VideoJobError{Code: job.Error.Code, Message: job.Error.Message}
 	}
 	return video
+}
+
+// AddAccount writes the account file and hot-adds it to the Gemini client
+// pool. It returns whether the file was newly created.
+func (s *OpenAIService) AddAccount(email, cookie, authUser string) (bool, error) {
+	return s.client.UpsertAccount(email, cookie, authUser)
 }
 
 // CreateSpeech generates music with Gemini Web for the audio/speech endpoint

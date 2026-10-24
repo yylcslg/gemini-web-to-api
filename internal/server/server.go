@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
+	"strings"
 	"time"
 
 	"gemini-web-to-api/internal/commons/configs"
@@ -37,6 +39,8 @@ func NewGeminiWebToAPI(log *zap.Logger, cfg *configs.Config) *fiber.App {
 		}))
 	}
 
+	app.Use(apiKeyMiddleware(cfg, log))
+
 	app.Get("/docs", ScalarUI)
 	app.Get("/openapi.json", OpenAPISpec)
 
@@ -50,6 +54,31 @@ func HealthCheck(c fiber.Ctx) error {
 		"status":  "ok",
 		"service": "gemini-web-to-api",
 	})
+}
+
+// apiKeyMiddleware requires "Authorization: Bearer <SK>" on every route
+// except the generated-image files under /data/images/.
+func apiKeyMiddleware(cfg *configs.Config, log *zap.Logger) fiber.Handler {
+	expected := strings.TrimSpace(cfg.Server.APIKey)
+	if expected == "" {
+		log.Warn("SK is not set; every API endpoint will reject requests")
+	}
+	return func(c fiber.Ctx) error {
+		// Generated images are served to <img> tags and cannot carry an Authorization header.
+		if strings.HasPrefix(c.Path(), "/data/images/") {
+			return c.Next()
+		}
+		token, ok := strings.CutPrefix(strings.TrimSpace(c.Get(fiber.HeaderAuthorization)), "Bearer ")
+		if expected == "" || !ok || subtle.ConstantTimeCompare([]byte(strings.TrimSpace(token)), []byte(expected)) != 1 {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": fiber.Map{
+					"message": "invalid or missing bearer token",
+					"type":    "authentication_error",
+				},
+			})
+		}
+		return c.Next()
+	}
 }
 
 // Register404Handler registers the 404 handler for unmatched routes
@@ -89,4 +118,3 @@ func RegisterFiberLifecycle(lc fx.Lifecycle, app *fiber.App, cfg *configs.Config
 		},
 	})
 }
-

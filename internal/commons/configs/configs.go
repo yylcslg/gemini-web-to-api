@@ -33,6 +33,7 @@ type GeminiConfig struct {
 	MaxRetries      int
 	Cookies         string
 	Temporary       bool
+	AccountDir      string
 }
 
 type ClaudeConfig struct {
@@ -48,7 +49,10 @@ type OpenAIConfig struct {
 }
 
 type ServerConfig struct {
-	Port string
+	Port    string
+	APIKey  string // SK: required on every API endpoint
+	AddKey  string // ADD_KEY/add_key: required in the POST /v1/addAccount body
+	BaseURL string // BASE_URL/base_url: public origin for generated asset links
 }
 
 const (
@@ -58,6 +62,7 @@ const (
 	// tends to get the session flagged or blocked.
 	minGeminiRefreshInterval = 10
 	defaultGeminiMaxRetries  = 3
+	defaultGeminiAccountDir  = "data/db"
 	defaultLogLevel          = "info"
 )
 
@@ -69,6 +74,19 @@ func New() (*Config, error) {
 
 	// Server
 	cfg.Server.Port = getEnv("PORT", defaultServerPort)
+	// SK is required on every API endpoint.
+	cfg.Server.APIKey = strings.TrimSpace(getEnv("SK", ""))
+	// ADD_KEY guards the addAccount request body; add_key is the legacy spelling.
+	cfg.Server.AddKey = strings.TrimSpace(getEnv("ADD_KEY", ""))
+	if cfg.Server.AddKey == "" {
+		cfg.Server.AddKey = strings.TrimSpace(getEnv("add_key", ""))
+	}
+	// BASE_URL is the public origin used for generated image links; empty means
+	// derive it from the server IP and PORT.
+	cfg.Server.BaseURL = strings.TrimSpace(getEnv("BASE_URL", ""))
+	if cfg.Server.BaseURL == "" {
+		cfg.Server.BaseURL = strings.TrimSpace(getEnv("base_url", ""))
+	}
 
 	// General
 	cfg.LogLevel = getEnv("LOG_LEVEL", defaultLogLevel)
@@ -92,6 +110,7 @@ func New() (*Config, error) {
 	}
 	cfg.Gemini.MaxRetries = getEnvInt("GEMINI_MAX_RETRIES", defaultGeminiMaxRetries)
 	cfg.Gemini.Temporary = getEnvBool("GEMINI_TEMPORARY", false)
+	cfg.Gemini.AccountDir = getEnv("GEMINI_ACCOUNT_DIR", defaultGeminiAccountDir)
 	if cfg.Gemini.AuthUser != "" {
 		if n, err := strconv.Atoi(cfg.Gemini.AuthUser); err != nil || n < 0 {
 			return nil, fmt.Errorf("invalid GEMINI_AUTH_USER value: %q (must be a non-negative account slot)", cfg.Gemini.AuthUser)
@@ -118,11 +137,10 @@ func cookieValue(header, wanted string) string {
 
 // Validate checks if the configuration has required values
 func (c *Config) Validate() error {
-	var missingVars []string
-
-	if strings.TrimSpace(c.Gemini.Cookies) == "" {
-		missingVars = append(missingVars, "GEMINI_COOKIES")
-	} else if c.Gemini.Secure1PSID == "" || c.Gemini.Secure1PSIDTS == "" {
+	// GEMINI_COOKIES is a legacy single-account fallback. Accounts are normally
+	// added through POST /v1/addAccount and stored in GEMINI_ACCOUNT_DIR, so the
+	// server may start with zero accounts.
+	if strings.TrimSpace(c.Gemini.Cookies) != "" && (c.Gemini.Secure1PSID == "" || c.Gemini.Secure1PSIDTS == "") {
 		return fmt.Errorf("GEMINI_COOKIES must contain __Secure-1PSID and __Secure-1PSIDTS")
 	}
 
@@ -133,10 +151,6 @@ func (c *Config) Validate() error {
 
 	if _, err := strconv.Atoi(c.Server.Port); err != nil {
 		return fmt.Errorf("invalid PORT value: %q (must be a number)", c.Server.Port)
-	}
-
-	if len(missingVars) > 0 {
-		return fmt.Errorf("missing required environment variables: %v. Please set them before running the application", missingVars)
 	}
 
 	return nil

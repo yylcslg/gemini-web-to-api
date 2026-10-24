@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"gemini-web-to-api/internal/commons/configs"
 	"gemini-web-to-api/internal/modules/openai/dto"
 	"gemini-web-to-api/internal/modules/providers"
 
@@ -80,7 +81,7 @@ func newVideoTestApp(t *testing.T, release chan struct{}) *fiber.App {
 		})
 	t.Cleanup(func() { _ = client.Close() })
 	app := fiber.New()
-	NewOpenAIController(NewOpenAIService(client, zap.NewNop()), zap.NewNop()).Register(app.Group("/openai/v1"))
+	NewOpenAIController(NewOpenAIService(providers.NewTestAccountPool(client), zap.NewNop()), zap.NewNop(), &configs.Config{}).Register(app.Group("/openai/v1"))
 	return app
 }
 

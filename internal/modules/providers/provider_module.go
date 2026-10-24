@@ -8,13 +8,14 @@ import (
 )
 
 var Module = fx.Options(
-	fx.Provide(NewClient),
+	fx.Provide(NewAccountStore),
+	fx.Provide(NewAccountPool),
 	fx.Provide(NewProviderManager),
 	fx.Invoke(RegisterProvider),
 )
 
-func RegisterProvider(lc fx.Lifecycle, pm *ProviderManager, c *Client, log *zap.Logger) {
-	pm.Register("gemini", c)
+func RegisterProvider(lc fx.Lifecycle, pm *ProviderManager, pool *AccountPool, log *zap.Logger) {
+	pm.Register("gemini", pool)
 
 	// Select Gemini as the active provider
 	if err := pm.SelectProvider("gemini"); err != nil {
@@ -24,17 +25,17 @@ func RegisterProvider(lc fx.Lifecycle, pm *ProviderManager, c *Client, log *zap.
 	initCtx, cancelInit := context.WithCancel(context.Background())
 	lc.Append(fx.Hook{
 		OnStart: func(context.Context) error {
-			log.Info("Starting Gemini provider initialization in background")
+			log.Info("Starting Gemini account initialization in background", zap.Int("accounts", pool.Len()))
 			go func() {
-				if err := c.Init(initCtx); err != nil {
-					log.Error("Gemini provider initialization failed", zap.Error(err))
+				if err := pool.Init(initCtx); err != nil {
+					log.Error("Gemini account initialization failed", zap.Error(err))
 				}
 			}()
 			return nil
 		},
 		OnStop: func(context.Context) error {
 			cancelInit()
-			return c.Close()
+			return pool.Close()
 		},
 	})
 }

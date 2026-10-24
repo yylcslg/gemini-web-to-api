@@ -12,6 +12,7 @@ import (
 	"html"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,6 +37,7 @@ type Client struct {
 	cookies                *CookieStore
 	configuredCookieHeader string // optional full browser Cookie header for rollout/session flags
 	authUser               string // Google multi-login slot used by the Gemini Web tab (for example "2")
+	accountName            string // account file name, used in logs
 	at                     string
 	cookieHeader           string // full Cookie header string built by refreshSessionToken, used in GenerateContent
 	pushID                 string
@@ -50,12 +52,16 @@ type Client struct {
 	autoRefresh      bool
 	refreshInterval  time.Duration
 	stopRefresh      chan struct{}
+	refreshOnce      sync.Once
+	initMu           sync.Mutex // serializes Init/UpdateCredentials for hot reloads
 	maxRetries       int
 	cachedModels     []geminiModel
 	defaultTemporary bool
 
 	videoJobsOnce sync.Once
 	videoJobs     *videoJobStore
+
+	assetBaseURL string // origin used to build public /data/images links
 }
 
 type CookieStore struct {
@@ -77,16 +83,33 @@ var (
 	sessionIDRegex           = regexp.MustCompile(`"FdrFJe":"([^"]+)"`)
 	languageRegex            = regexp.MustCompile(`"TuX5cc":"([^"]+)"`)
 	imageURLRegex            = regexp.MustCompile(`(?i)(?:https?:)?//[^\s"'<>\\]+|(?:[a-z0-9.-]+\.)?googleusercontent\.com/[^\s"'<>\\]+`)
+	modelIDRegex             = regexp.MustCompile(`gemini-[a-zA-Z0-9.-]+`)
+	validModelPrefixRegex    = regexp.MustCompile(`^gemini-(\d|advanced)`)
+	detailImgUrlRegex        = regexp.MustCompile(`https://[^\s"'\\]+googleusercontent\.com[^\s"'\\\]]*`)
 )
 
 func NewClient(cfg *configs.Config, log *zap.Logger) *Client {
+	return NewAccountClient(Account{
+		Name:     "env",
+		AuthUser: strings.TrimSpace(cfg.Gemini.AuthUser),
+		Cookies:  cfg.Gemini.Cookies,
+		Enabled:  true,
+	}, cfg, log)
+}
+
+// NewAccountClient builds a client for one account. Every client owns its own
+// req.Client and cookie store, so accounts never share session state.
+func NewAccountClient(account Account, cfg *configs.Config, log *zap.Logger) *Client {
 	cookies := &CookieStore{
-		Secure1PSID:   cfg.Gemini.Secure1PSID,
-		Secure1PSIDTS: cfg.Gemini.Secure1PSIDTS,
+		Secure1PSID:   cookieValueFromHeader(account.Cookies, "__Secure-1PSID"),
+		Secure1PSIDTS: cookieValueFromHeader(account.Cookies, "__Secure-1PSIDTS"),
 		UpdatedAt:     time.Now(),
 	}
 
-	proxy := strings.TrimSpace(cfg.Gemini.Proxy)
+	proxy := strings.TrimSpace(account.Proxy)
+	if proxy == "" {
+		proxy = strings.TrimSpace(cfg.Gemini.Proxy)
+	}
 	client := req.NewClient()
 	if proxy != "" {
 		client.SetProxyURL(proxy)
@@ -103,18 +126,43 @@ func NewClient(cfg *configs.Config, log *zap.Logger) *Client {
 		httpClient:             client,
 		proxyURL:               proxy,
 		cookies:                cookies,
-		configuredCookieHeader: strings.TrimSpace(cfg.Gemini.Cookies),
-		authUser:               strings.TrimSpace(cfg.Gemini.AuthUser),
+		configuredCookieHeader: strings.TrimSpace(account.Cookies),
+		authUser:               strings.TrimSpace(account.AuthUser),
+		accountName:            account.Name,
 		autoRefresh:            true,
 		refreshInterval:        time.Duration(refreshIntervalMinutes) * time.Minute,
 		stopRefresh:            make(chan struct{}),
 		maxRetries:             cfg.Gemini.MaxRetries,
 		log:                    log,
 		defaultTemporary:       cfg.Gemini.Temporary,
+		assetBaseURL:           assetBaseURL(cfg),
 	}
 }
 
+// assetBaseURL returns the public origin for generated asset links. An empty
+// BASE_URL falls back to the server's outbound IP and configured port.
+func assetBaseURL(cfg *configs.Config) string {
+	if base := strings.TrimRight(strings.TrimSpace(cfg.Server.BaseURL), "/"); base != "" {
+		return base
+	}
+	ip := "127.0.0.1"
+	if conn, err := net.Dial("udp", "8.8.8.8:80"); err == nil {
+		if addr, ok := conn.LocalAddr().(*net.UDPAddr); ok && addr.IP != nil {
+			ip = addr.IP.String()
+		}
+		_ = conn.Close()
+	}
+	port := cfg.Server.Port
+	if port == "" {
+		port = "4981"
+	}
+	return "http://" + net.JoinHostPort(ip, port)
+}
+
 func (c *Client) Init(ctx context.Context) error {
+	c.initMu.Lock()
+	defer c.initMu.Unlock()
+
 	// Clean cookies
 	c.cookies.Secure1PSID = cleanCookie(c.cookies.Secure1PSID)
 	configPSIDTS := cleanCookie(c.cookies.Secure1PSIDTS) // Save original config value
@@ -172,7 +220,9 @@ func (c *Client) Init(ctx context.Context) error {
 
 	// 5. Start auto-refresh in background
 	if c.autoRefresh {
-		go c.startAutoRefresh()
+		c.refreshOnce.Do(func() {
+			go c.startAutoRefresh()
+		})
 	}
 
 	return nil
@@ -492,6 +542,33 @@ func (c *Client) GetCookies() *CookieStore {
 		Secure1PSIDTS: c.cookies.Secure1PSIDTS,
 		UpdatedAt:     c.cookies.UpdatedAt,
 	}
+}
+
+// UpdateCredentials replaces the account credentials in place so a running
+// client keeps its video jobs and cached models before re-initializing.
+func (c *Client) UpdateCredentials(cookieHeader, authUser string) {
+	c.initMu.Lock()
+	defer c.initMu.Unlock()
+
+	cookieHeader = strings.TrimSpace(cookieHeader)
+	psid := cleanCookie(cookieValueFromHeader(cookieHeader, "__Secure-1PSID"))
+	psidts := cleanCookie(cookieValueFromHeader(cookieHeader, "__Secure-1PSIDTS"))
+
+	c.mu.Lock()
+	c.configuredCookieHeader = cookieHeader
+	c.authUser = strings.TrimSpace(authUser)
+	c.at = ""
+	c.cookieHeader = ""
+	c.healthy = false
+	c.mu.Unlock()
+
+	c.cookies.mu.Lock()
+	c.cookies.Secure1PSID = psid
+	c.cookies.Secure1PSIDTS = psidts
+	c.cookies.UpdatedAt = time.Now()
+	c.cookies.mu.Unlock()
+
+	c.httpClient.SetCommonCookies(c.cookies.ToHTTPCookies()...)
 }
 
 func (c *Client) GenerateContent(ctx context.Context, prompt string, options ...GenerateOption) (*Response, error) {
@@ -1582,6 +1659,10 @@ func (c *Client) ThumbnailToUrl(ctx context.Context, thumbnailUrl string, genRes
 	return downloadImg(c, ctx, authUrl)
 }
 
+func DownloadImageToLocal(ctx context.Context, c *Client, imageURL string) (string, error) {
+	return downloadImg(c, ctx, imageURL)
+}
+
 func batchexecute_ESY5D(c *Client, ctx context.Context, cid, extId string) (string, error) {
 	fullPath := batchExecUrlParam(c, cid, "ESY5D")
 
@@ -1747,16 +1828,10 @@ func downloadImg(c *Client, ctx context.Context, fullUrl string) (string, error)
 		}
 	}
 	fileName := uuid.NewString() + extension
-	path = filepath.Join("data", "images", fileName)
-	if err := os.WriteFile(path, imgBytes, 0644); err != nil {
+	localPath := filepath.Join("data", "images", fileName)
+	if err := os.WriteFile(localPath, imgBytes, 0644); err != nil {
 		return "", fmt.Errorf("save image: %w", err)
 	}
 
-	return path, nil
+	return c.assetBaseURL + "/data/images/" + fileName, nil
 }
-
-var (
-	modelIDRegex          = regexp.MustCompile(`gemini-[a-zA-Z0-9.-]+`)
-	validModelPrefixRegex = regexp.MustCompile(`^gemini-(\d|advanced)`)
-	detailImgUrlRegex     = regexp.MustCompile(`https://[^\s"'\\]+googleusercontent\.com[^\s"'\\\]]*`)
-)

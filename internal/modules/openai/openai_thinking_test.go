@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"gemini-web-to-api/internal/commons/configs"
 	"gemini-web-to-api/internal/modules/providers"
 
 	"github.com/gofiber/fiber/v3"
@@ -31,9 +32,9 @@ func TestChatCompletionsRejectInvalidReasoningEffortBeforeModelResolution(t *tes
 		t.Run(fmt.Sprintf("stream=%t", streaming), func(t *testing.T) {
 			// An empty registry must not hide the more actionable request error.
 			// This client has no credentials or HTTP transport and cannot call Gemini.
-			service := NewOpenAIService(&providers.Client{}, zap.NewNop())
+			service := NewOpenAIService(providers.NewTestAccountPool(&providers.Client{}), zap.NewNop())
 			app := fiber.New()
-			NewOpenAIController(service, zap.NewNop()).Register(app.Group("/openai/v1"))
+			NewOpenAIController(service, zap.NewNop(), &configs.Config{}).Register(app.Group("/openai/v1"))
 			input := fmt.Sprintf(`{"model":"gemini-3.6-flash","reasoning_effort":"ultra","stream":%t,"messages":[{"role":"user","content":"Hello"}]}`, streaming)
 			req := httptest.NewRequest(http.MethodPost, "/openai/v1/chat/completions", strings.NewReader(input))
 			req.Header.Set("Content-Type", "application/json")

@@ -12,6 +12,7 @@ var Module = fx.Options(
 )
 
 func RegisterRoutes(app *fiber.App, c *OpenAIController) {
+	app.Get("/data/images/:id", c.HandleGetImage)
 	openaiV1 := app.Group("/v1")
 	c.Register(openaiV1)
 }

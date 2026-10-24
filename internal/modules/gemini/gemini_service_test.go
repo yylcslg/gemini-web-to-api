@@ -106,7 +106,7 @@ func TestVideoOperationMatchesGoogleGenAI(t *testing.T) {
 			return &providers.VideoResult{Video: providers.Video{MimeType: "video/mp4"}, Data: []byte("mp4-bytes")}, nil
 		})
 	t.Cleanup(func() { _ = client.Close() })
-	controller := NewGeminiController(NewGeminiService(client, zap.NewNop()), zap.NewNop())
+	controller := NewGeminiController(NewGeminiService(providers.NewTestAccountPool(client), zap.NewNop()), zap.NewNop())
 	t.Cleanup(controller.Close)
 	app := fiber.New()
 	controller.Register(app.Group("/gemini/v1beta"))

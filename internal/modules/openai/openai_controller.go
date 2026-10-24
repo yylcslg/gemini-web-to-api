@@ -3,10 +3,16 @@ package openai
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
+	"mime"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"gemini-web-to-api/internal/commons/configs"
 	models "gemini-web-to-api/internal/commons/models"
 	utils "gemini-web-to-api/internal/commons/utils"
 	"gemini-web-to-api/internal/modules/openai/dto"
@@ -19,12 +25,18 @@ import (
 type OpenAIController struct {
 	service *OpenAIService
 	log     *zap.Logger
+	addKey  string
 }
 
-func NewOpenAIController(service *OpenAIService, log *zap.Logger) *OpenAIController {
+func NewOpenAIController(service *OpenAIService, log *zap.Logger, cfg *configs.Config) *OpenAIController {
+	addKey := strings.TrimSpace(cfg.Server.AddKey)
+	if addKey == "" {
+		log.Warn("ADD_KEY/add_key is not set; POST /v1/addAccount will reject every request")
+	}
 	return &OpenAIController{
 		service: service,
 		log:     log,
+		addKey:  addKey,
 	}
 }
 
@@ -354,8 +366,73 @@ func (h *OpenAIController) HandleSpeech(c fiber.Ctx) error {
 	return c.Send(data)
 }
 
+func (h *OpenAIController) HandleGetImage(c fiber.Ctx) error {
+	id := filepath.Base(c.Params("id"))
+	if id == "." || id == string(filepath.Separator) || id == "" {
+		return c.SendStatus(fiber.StatusBadRequest)
+	}
+
+	filePath := filepath.Join("data", "images", id)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return c.SendStatus(fiber.StatusNotFound)
+		}
+		return err
+	}
+
+	contentType := mime.TypeByExtension(filepath.Ext(id))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	c.Set(fiber.HeaderContentType, contentType)
+	return c.Send(data)
+}
+
+type addAccountRequest struct {
+	Email    string `json:"email"`
+	Cookie   string `json:"cookie"`
+	AuthUser string `json:"auth_user"`
+	AddKey   string `json:"add_key"`
+}
+
+type addAccountResponse struct {
+	Email       string `json:"email"`
+	Created     bool   `json:"created"`
+	Initialized bool   `json:"initialized"`
+}
+
+// HandleAddAccount creates or fully overwrites one Gemini account file under
+// data/db and adds it to the client pool. Initialization runs in the background.
+func (h *OpenAIController) HandleAddAccount(c fiber.Ctx) error {
+	var req addAccountRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(utils.ErrorToResponse(fmt.Errorf("invalid request body: %w", err), "invalid_request_error"))
+	}
+	if h.addKey == "" || subtle.ConstantTimeCompare([]byte(strings.TrimSpace(req.AddKey)), []byte(h.addKey)) != 1 {
+		return c.Status(fiber.StatusUnauthorized).JSON(utils.ErrorToResponse(errors.New("invalid add_key"), "authentication_error"))
+	}
+
+	created, err := h.service.AddAccount(req.Email, req.Cookie, req.AuthUser)
+	if err != nil {
+		var validationErr *providers.AccountValidationError
+		if errors.As(err, &validationErr) {
+			return c.Status(fiber.StatusBadRequest).JSON(utils.ErrorToResponse(err, "invalid_request_error"))
+		}
+		h.log.Error("AddAccount failed", zap.Error(err))
+		return c.Status(fiber.StatusInternalServerError).JSON(utils.ErrorToResponse(err, "api_error"))
+	}
+
+	return c.Status(fiber.StatusAccepted).JSON(addAccountResponse{
+		Email:       strings.ToLower(strings.TrimSpace(req.Email)),
+		Created:     created,
+		Initialized: false,
+	})
+}
+
 // Register registers the OpenAI routes onto the provided group
 func (c *OpenAIController) Register(group fiber.Router) {
+	//group.Get("/images/:id", c.HandleGetImage)
 	group.Get("/models", c.HandleModels)
 	group.Get("/models/:model", c.HandleModel)
 	group.Post("/chat/completions", c.HandleChatCompletions)
@@ -366,4 +443,5 @@ func (c *OpenAIController) Register(group fiber.Router) {
 	group.Get("/videos/:id", c.HandleGetVideo)
 	group.Delete("/videos/:id", c.HandleDeleteVideo)
 	group.Get("/videos/:id/content", c.HandleVideoContent)
+	group.Post("/addAccount", c.HandleAddAccount)
 }

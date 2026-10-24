@@ -347,7 +347,7 @@ type ChunkChoice struct {
 // ImageGenerationRequest represents an OpenAI-compatible image generation request.
 type ImageGenerationRequest struct {
 	Model          string   `json:"model,omitempty"`
-	Images         []string `json:"images"`
+	Images         []string `json:"images,omitempty"`
 	Prompt         string   `json:"prompt"`
 	N              int      `json:"n,omitempty"`
 	Size           string   `json:"size,omitempty"`

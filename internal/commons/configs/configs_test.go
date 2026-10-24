@@ -23,13 +23,14 @@ func TestNewRejectsInvalidGeminiAuthUser(t *testing.T) {
 	}
 }
 
-func TestNewRequiresCompleteGeminiCookiesHeader(t *testing.T) {
+func TestNewAllowsMissingGeminiCookies(t *testing.T) {
 	t.Setenv("GEMINI_COOKIES", "")
-	// Legacy variables must not create a second authentication path.
+	// Accounts are added through POST /v1/addAccount, so the server must start
+	// without GEMINI_COOKIES.
 	t.Setenv("GEMINI_1PSID", "legacy-psid")
 	t.Setenv("GEMINI_1PSIDTS", "legacy-psidts")
-	if _, err := New(); err == nil || !strings.Contains(err.Error(), "GEMINI_COOKIES") {
-		t.Fatalf("expected GEMINI_COOKIES requirement, got %v", err)
+	if _, err := New(); err != nil {
+		t.Fatalf("expected startup without GEMINI_COOKIES, got %v", err)
 	}
 
 	t.Setenv("GEMINI_COOKIES", "NID=rollout; __Secure-1PSID=psid")
