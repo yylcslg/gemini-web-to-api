@@ -5,6 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -292,4 +296,56 @@ func ExtractThinkingAndText(raw string) (string, string) {
 
 	textContent := strings.TrimSpace(textBefore + textAfter)
 	return thinking, textContent
+}
+
+// 格式化扩展名的辅助函数
+func GetExtension(mimeType string) string {
+	// 1. 先尝试获取标准扩展名
+	exts, _ := mime.ExtensionsByType(mimeType)
+
+	if len(exts) > 0 {
+		// 2. 针对常见的 jpeg 进行特殊处理，确保返回 .jpg 或 .jpeg 而不是 .jpe
+		for _, e := range exts {
+			if e == ".jpg" || e == ".jpeg" {
+				return e
+			}
+		}
+		// 如果没有 jpeg 映射，返回列表中的第一个
+		return exts[0]
+	}
+
+	// 3. 如果 mime 库没查到，手动兜底常用类型
+	switch mimeType {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/webp":
+		return ".webp"
+	case "image/gif":
+		return ".gif"
+	default:
+		return ".png" // 最终兜底
+	}
+}
+
+func ImageURLToBase64(imageURL string, num int) (string, []byte, error) {
+	resp, err := http.Get(imageURL)
+	if err != nil {
+		return "", nil, err
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", nil, err
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+
+	fmt.Println("contentType:" + contentType + " len :" + strconv.Itoa(len(data)))
+	return contentType, data, nil
 }

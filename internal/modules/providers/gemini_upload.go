@@ -143,6 +143,12 @@ func (c *Client) uploadFile(ctx context.Context, filename, mimeType string, data
 func (c *Client) uploadFileTo(ctx context.Context, endpoint, filename, mimeType string, data []byte, cookieHdr string) (uploadedFile, error) {
 	client := *c.httpClient.GetClient()
 	client.Timeout = uploadTimeout
+	if c.proxyURL != "" {
+		proxyURL, _ := url.Parse(c.proxyURL)
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.Proxy = http.ProxyURL(proxyURL)
+		client.Transport = transport
+	}
 	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
 		return validateUploadURL(req.URL.String(), endpoint)
 	}

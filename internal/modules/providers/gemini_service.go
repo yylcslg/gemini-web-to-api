@@ -32,6 +32,7 @@ import (
 
 type Client struct {
 	httpClient             *req.Client
+	proxyURL               string
 	cookies                *CookieStore
 	configuredCookieHeader string // optional full browser Cookie header for rollout/session flags
 	authUser               string // Google multi-login slot used by the Gemini Web tab (for example "2")
@@ -85,8 +86,12 @@ func NewClient(cfg *configs.Config, log *zap.Logger) *Client {
 		UpdatedAt:     time.Now(),
 	}
 
-	client := req.NewClient().
-		SetTimeout(10 * time.Minute).
+	proxy := strings.TrimSpace(cfg.Gemini.Proxy)
+	client := req.NewClient()
+	if proxy != "" {
+		client.SetProxyURL(proxy)
+	}
+	client.SetTimeout(10 * time.Minute).
 		SetCommonHeaders(DefaultHeaders)
 
 	refreshIntervalMinutes := cfg.Gemini.RefreshInterval
@@ -96,6 +101,7 @@ func NewClient(cfg *configs.Config, log *zap.Logger) *Client {
 
 	return &Client{
 		httpClient:             client,
+		proxyURL:               proxy,
 		cookies:                cookies,
 		configuredCookieHeader: strings.TrimSpace(cfg.Gemini.Cookies),
 		authUser:               strings.TrimSpace(cfg.Gemini.AuthUser),
@@ -172,9 +178,21 @@ func (c *Client) Init(ctx context.Context) error {
 	return nil
 }
 
+func (c *Client) httpClientWithProxy(timeout time.Duration) *http.Client {
+	client := &http.Client{Timeout: timeout}
+	if c.proxyURL != "" {
+		proxyURL, _ := url.Parse(c.proxyURL)
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.Proxy = http.ProxyURL(proxyURL)
+		client.Transport = transport
+	}
+	return client
+}
+
 func (c *Client) refreshSessionToken(ctx context.Context) error {
 	// 1. Initial hit to google.com to get extra cookies (NID, etc)
 	tmpClient := req.NewClient().
+		SetProxyURL(c.proxyURL).
 		SetTimeout(30 * time.Second).
 		SetUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
@@ -219,11 +237,9 @@ func (c *Client) refreshSessionToken(ctx context.Context) error {
 		"User-Agent":                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 	}
 
-	hClient := &http.Client{
-		Timeout: 30 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return nil // follow redirects
-		},
+	hClient := c.httpClientWithProxy(30 * time.Second)
+	hClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return nil // follow redirects
 	}
 
 	// Helper to merge cookies into a map to avoid duplicates
@@ -430,7 +446,7 @@ func (c *Client) RotateCookies() error {
 	req.Header.Set("Cookie", cookieStr)
 
 	c.log.Debug("Sending rotation request", zap.String("url", EndpointRotateCookies))
-	hClient := &http.Client{Timeout: 5 * time.Second}
+	hClient := c.httpClientWithProxy(5 * time.Second)
 	resp, err := hClient.Do(req)
 	if err != nil {
 		// Log as Info to avoid scary stacktraces in development mode for expected auth failures
@@ -614,7 +630,7 @@ func (c *Client) generateContent(ctx context.Context, prompt string, metadata []
 	}
 
 	// Use a plain http.Client to avoid cookie accumulation issues with the req library
-	plainClient := &http.Client{Timeout: 5 * time.Minute}
+	plainClient := c.httpClientWithProxy(5 * time.Minute)
 
 	totalStart := time.Now()
 
@@ -691,6 +707,16 @@ func (c *Client) generateContent(ctx context.Context, prompt string, metadata []
 		parseStart := time.Now()
 		result, parseErr := c.parseResponse(respBody)
 		parseDuration := time.Since(parseStart)
+
+		if parseErr == nil && len(result.Images) == 0 {
+			bodySnippet := respBody
+			if len(bodySnippet) > 16*1024 {
+				bodySnippet = bodySnippet[:16*1024] + "… (truncated)"
+			}
+			c.log.Debug("Gemini response contains no generated images",
+				zap.String("response_body", bodySnippet),
+			)
+		}
 
 		if parseErr != nil {
 			lastErr = parseErr
@@ -804,6 +830,12 @@ func (c *Client) downloadGeneratedImage(ctx context.Context, rawURL, cookieHeade
 		return "", fmt.Errorf("refusing generated-image download from untrusted host")
 	}
 	client := generatedImageHTTPClient(cookieHeader)
+	if c.proxyURL != "" {
+		proxyURL, _ := url.Parse(c.proxyURL)
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.Proxy = http.ProxyURL(proxyURL)
+		client.Transport = transport
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
 		return "", err

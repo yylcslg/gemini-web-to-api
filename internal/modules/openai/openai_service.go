@@ -178,14 +178,31 @@ func (s *OpenAIService) CreateImageGeneration(ctx context.Context, req dto.Image
 		return nil, fmt.Errorf("n must be between 1 and 10")
 	}
 
-	imagePrompt := buildImageGenerationPrompt(prompt, req.Size)
+	imagePrompt := buildImageGenerationPrompt(prompt, req.Size, req.Quality)
+
 	wantB64 := strings.EqualFold(req.ResponseFormat, "b64_json")
 	opts := []providers.GenerateOption{}
 	if req.Model != "" {
 		opts = append(opts, providers.WithModel(req.Model))
 	}
-	if wantB64 {
-		opts = append(opts, providers.WithGeneratedImageDownload(true))
+	opts = append(opts, providers.WithGeneratedImageDownload(true))
+	// if wantB64 {
+	// 	opts = append(opts, providers.WithGeneratedImageDownload(true))
+	// }
+	if len(req.Images) > 0 {
+		inputFiles := make([]providers.InputFile, 0, len(req.Images))
+		for i, imageURL := range req.Images {
+			contentType, byteDatas, err := utils.ImageURLToBase64(imageURL, i+1)
+			if err != nil {
+				return nil, fmt.Errorf("convert input image %d: %w", i+1, err)
+			}
+			inputFiles = append(inputFiles, providers.InputFile{
+				Name:     "image_" + strconv.Itoa(i+1) + utils.GetExtension(contentType),
+				Data:     byteDatas,
+				MimeType: contentType,
+			})
+		}
+		opts = append(opts, providers.WithInputFiles(inputFiles))
 	}
 
 	data := make([]dto.ImageGenerationData, 0, n)
@@ -228,13 +245,18 @@ func (s *OpenAIService) CreateImageGeneration(ctx context.Context, req dto.Image
 	}, nil
 }
 
-func buildImageGenerationPrompt(prompt, size string) string {
+func buildImageGenerationPrompt(prompt, size, quality string) string {
 	var b strings.Builder
 	b.WriteString("Generate an image from this prompt. Return the generated image, not only a text description.\n\nPrompt: ")
 	b.WriteString(prompt)
 	if strings.TrimSpace(size) != "" {
 		b.WriteString("\nRequested size/aspect: ")
 		b.WriteString(strings.TrimSpace(size))
+	}
+	if strings.TrimSpace(quality) != "" {
+		b.WriteString("\nRequested quality: ")
+		b.WriteString(strings.TrimSpace(quality))
+		b.WriteString("\t 4K UHD, ultra-high detail, high-definition textures, sharp focus, cinematic lighting, global illumination, masterpiece quality, 8K wallpaper style.")
 	}
 	return b.String()
 }

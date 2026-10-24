@@ -12,8 +12,6 @@ var Module = fx.Options(
 )
 
 func RegisterRoutes(app *fiber.App, c *OpenAIController) {
-	// OpenAI routes (prefixed with /openai)
-	openaiGroup := app.Group("/openai")
-	openaiV1 := openaiGroup.Group("/v1")
+	openaiV1 := app.Group("/v1")
 	c.Register(openaiV1)
 }

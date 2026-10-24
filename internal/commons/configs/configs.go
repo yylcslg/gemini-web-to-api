@@ -25,6 +25,7 @@ type RateLimitConfig struct {
 }
 
 type GeminiConfig struct {
+	Proxy           string
 	Secure1PSID     string
 	Secure1PSIDTS   string
 	AuthUser        string
@@ -56,8 +57,8 @@ const (
 	// Rotating cookies more often than this looks automated to Google and
 	// tends to get the session flagged or blocked.
 	minGeminiRefreshInterval = 10
-	defaultGeminiMaxRetries      = 3
-	defaultLogLevel              = "info"
+	defaultGeminiMaxRetries  = 3
+	defaultLogLevel          = "info"
 )
 
 func New() (*Config, error) {
@@ -78,6 +79,7 @@ func New() (*Config, error) {
 	cfg.RateLimit.MaxRequests = getEnvInt("RATE_LIMIT_MAX_REQUESTS", 10)
 
 	// Gemini
+	cfg.Gemini.Proxy = strings.TrimSpace(os.Getenv("GEMINI_PROXY"))
 	cfg.Gemini.Cookies = os.Getenv("GEMINI_COOKIES")
 	cfg.Gemini.AuthUser = strings.TrimSpace(os.Getenv("GEMINI_AUTH_USER"))
 	cfg.Gemini.Secure1PSID = cookieValue(cfg.Gemini.Cookies, "__Secure-1PSID")

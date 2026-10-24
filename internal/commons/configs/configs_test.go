@@ -38,6 +38,18 @@ func TestNewRequiresCompleteGeminiCookiesHeader(t *testing.T) {
 	}
 }
 
+func TestNewReadsGeminiProxy(t *testing.T) {
+	t.Setenv("GEMINI_COOKIES", "__Secure-1PSID=psid; __Secure-1PSIDTS=psidts")
+	t.Setenv("GEMINI_PROXY", " http://127.0.0.1:8889 ")
+	cfg, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Gemini.Proxy != "http://127.0.0.1:8889" {
+		t.Fatalf("Gemini proxy = %q", cfg.Gemini.Proxy)
+	}
+}
+
 func TestNewDerivesAuthenticationFromGeminiCookies(t *testing.T) {
 	t.Setenv("GEMINI_COOKIES", "NID=rollout; __Secure-1PSID=psid; __Secure-1PSIDTS=psidts")
 	t.Setenv("GEMINI_AUTH_USER", "2")

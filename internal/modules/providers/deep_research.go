@@ -4,12 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"gemini-web-to-api/internal/commons/utils"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
-
-	"gemini-web-to-api/internal/commons/utils"
 
 	"go.uber.org/zap"
 )

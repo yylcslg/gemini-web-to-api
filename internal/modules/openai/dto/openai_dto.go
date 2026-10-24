@@ -346,11 +346,13 @@ type ChunkChoice struct {
 
 // ImageGenerationRequest represents an OpenAI-compatible image generation request.
 type ImageGenerationRequest struct {
-	Model          string `json:"model,omitempty"`
-	Prompt         string `json:"prompt"`
-	N              int    `json:"n,omitempty"`
-	Size           string `json:"size,omitempty"`
-	ResponseFormat string `json:"response_format,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	Images         []string `json:"images"`
+	Prompt         string   `json:"prompt"`
+	N              int      `json:"n,omitempty"`
+	Size           string   `json:"size,omitempty"`
+	Quality        string   `json:"quality,omitempty"`
+	ResponseFormat string   `json:"response_format,omitempty"`
 }
 
 // ImageGenerationResponse represents an OpenAI-compatible image generation response.

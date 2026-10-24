@@ -63,10 +63,10 @@ func WithVideoGeneration(aspect VideoAspectRatio) GenerateOption {
 // Video is a generated video card returned by Gemini Web. URLs are bound to
 // the Gemini session and must be downloaded with its cookies.
 type Video struct {
-	URL          string `json:"url"`
-	ThumbnailURL string `json:"thumbnail_url,omitempty"`
-	FileName     string `json:"file_name,omitempty"`
-	MimeType     string `json:"mime_type,omitempty"`
+	URL          string  `json:"url"`
+	ThumbnailURL string  `json:"thumbnail_url,omitempty"`
+	FileName     string  `json:"file_name,omitempty"`
+	MimeType     string  `json:"mime_type,omitempty"`
 	Width        int     `json:"width,omitempty"`
 	Height       int     `json:"height,omitempty"`
 	Duration     float64 `json:"duration,omitempty"` // seconds
@@ -440,7 +440,7 @@ func (c *Client) readConversationCandidates(ctx context.Context, conversationID 
 	request.Header.Set(geminiModelHeaderKey, string(headerJSON))
 	request.Header.Set("x-goog-ext-73010989-jspb", "[0]")
 
-	response, err := (&http.Client{Timeout: time.Minute}).Do(request)
+	response, err := c.httpClientWithProxy(time.Minute).Do(request)
 	if err != nil {
 		var requestErr *url.Error
 		if errors.As(err, &requestErr) {
