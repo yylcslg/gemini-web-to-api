@@ -363,6 +363,7 @@ type ImageGenerationResponse struct {
 
 // ImageGenerationData represents one generated image.
 type ImageGenerationData struct {
+	Thumbnail     string `json:"thumbnail,omitempty"`
 	URL           string `json:"url,omitempty"`
 	B64JSON       string `json:"b64_json,omitempty"`
 	RevisedPrompt string `json:"revised_prompt,omitempty"`

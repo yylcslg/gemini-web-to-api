@@ -185,10 +185,10 @@ func (s *OpenAIService) CreateImageGeneration(ctx context.Context, req dto.Image
 	if req.Model != "" {
 		opts = append(opts, providers.WithModel(req.Model))
 	}
-	opts = append(opts, providers.WithGeneratedImageDownload(true))
-	// if wantB64 {
-	// 	opts = append(opts, providers.WithGeneratedImageDownload(true))
-	// }
+
+	if wantB64 {
+		opts = append(opts, providers.WithGeneratedImageDownload(true))
+	}
 	if len(req.Images) > 0 {
 		inputFiles := make([]providers.InputFile, 0, len(req.Images))
 		for i, imageURL := range req.Images {
@@ -233,7 +233,13 @@ func (s *OpenAIService) CreateImageGeneration(ctx context.Context, req dto.Image
 				}
 				item.B64JSON = image.B64JSON
 			} else {
-				item.URL = image.URL
+				item.Thumbnail = image.URL
+				item.URL, err = s.client.ThumbnailToUrl(ctx, image.URL, response)
+				if err != nil {
+					s.log.Error("convert thumbnail to url failed", zap.Error(err))
+					item.URL = image.URL
+				}
+
 			}
 			data = append(data, item)
 		}

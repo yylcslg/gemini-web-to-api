@@ -1562,3 +1562,201 @@ func geminiSourcePath(authUser string) string {
 	}
 	return "/u/" + authUser + "/app"
 }
+
+func (c *Client) ThumbnailToUrl(ctx context.Context, thumbnailUrl string, genResp *Response) (string, error) {
+	path := ""
+	cid := responseCID(genResp)
+	extId := strings.ToUpper(uuid.NewString())
+	if _, err := batchexecute_ESY5D(c, ctx, cid, extId); err != nil {
+		return path, err
+	}
+
+	if _, err := batchexecute_c8o8Fe(c, ctx, cid, extId, genResp); err != nil {
+		return path, err
+	}
+	fmt.Printf("thumbnailUrl:%s\n", thumbnailUrl)
+	authUrl, err := imgRequestAuth(c, ctx, thumbnailUrl)
+	if err != nil {
+		return path, err
+	}
+	return downloadImg(c, ctx, authUrl)
+}
+
+func batchexecute_ESY5D(c *Client, ctx context.Context, cid, extId string) (string, error) {
+	fullPath := batchExecUrlParam(c, cid, "ESY5D")
+
+	formValues := url.Values{}
+	formValues.Set("at", c.at)
+
+	formValues.Set("f.req", `[[["ESY5D","[[[\"bard_activity_enabled\"]]]",null,"generic"]]]`)
+	formBody := formValues.Encode()
+
+	plainClient := c.httpClientWithProxy(5 * time.Minute)
+	req, err := http.NewRequestWithContext(ctx, "POST", fullPath, strings.NewReader(formBody))
+
+	req.Header = buildBatchExecHeader_ESY5D(c.cookieHeader, extId)
+
+	resp, err := plainClient.Do(req)
+
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+
+		respBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", err
+		}
+		c.log.Error("batchexecute_ESY5D failed", zap.String("Status", resp.Status), zap.String("respBody", string(respBytes)))
+		return "", errors.New("status_ESY5D: " + resp.Status + " is not ok")
+	}
+	respBytes, _ := io.ReadAll(resp.Body)
+	c.log.Info("batchexecute_ESY5D ", zap.String("Status", resp.Status), zap.String("respBody", string(respBytes)))
+
+	return "", nil
+}
+
+func batchexecute_c8o8Fe(c *Client, ctx context.Context, cid, extId string, genResp *Response) (string, error) {
+	fullPath := batchExecUrlParam(c, cid, "c8o8Fe")
+
+	plainClient := c.httpClientWithProxy(5 * time.Minute)
+
+	formValues := url.Values{}
+	formValues.Set("at", c.at)
+	tempField := `[[["c8o8Fe","[[[null,null,null,[null,null,null,null,null,\"%s\"]],[\"%s\",0],null,[20,\"\",null,null,null,null,null,null,null,null,null,null,null,null,null,null,0,null,\"imagen_default.complaintflow\"],null,null,null,null,null,\"%s\"],[\"%s\",\"%s\",\"%s\",null,\"%s\"],1,0,1]",null,"generic"]]]`
+
+	imgPrefix := genResp.Metadata["imgPrefix"]
+	token := genResp.Metadata["token"]
+	rid := genResp.Metadata["rid"]
+	rcid := genResp.Metadata["rcid"]
+	logId := utils.GenerateCID()
+
+	field := fmt.Sprintf(tempField, token, imgPrefix, logId, rid, rcid, cid, logId)
+	c.log.Info("batchexecute_c8o8Fe ", zap.String("field", field))
+	formValues.Set("f.req", field)
+	formBody := formValues.Encode()
+	req, _ := http.NewRequestWithContext(ctx, "POST", fullPath, strings.NewReader(formBody))
+
+	req.Header = buildBatchExecHeader_c8o8Fe(c.cookieHeader, extId)
+
+	resp, err := plainClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBytes, err := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		if err != nil {
+			return "", err
+		}
+		c.log.Error("batchexecute_c8o8Fe failed", zap.String("Status", resp.Status), zap.String("respBody", string(respBytes)))
+		return "", errors.New("status_c8o8Fe: " + resp.Status + " is not ok")
+	}
+	//respBody := string(respBytes)
+	// c.log.Info("batchexecute_c8o8Fe ", zap.String("Status", resp.Status), zap.String("respBody", string(respBytes)))
+
+	// imgUrl := detailImgUrlRegex.FindString(respBody)
+
+	// if len(imgUrl) == 0 {
+	// 	return "", errors.New("[batchexecute_c8o8Fe] not find imgUrl")
+	// }
+
+	return "", nil
+}
+func imgRequestAuth(c *Client, ctx context.Context, fullURL string) (string, error) {
+	for retry := 0; retry < 5; retry++ {
+
+		fullURL = utils.EnsureAlrYes(fullURL)
+		plainClient := c.httpClientWithProxy(5 * time.Minute)
+
+		req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
+		if err != nil {
+			return "", err
+		}
+
+		req.Header = buildBaseHeader(c.cookieHeader)
+
+		resp, err := plainClient.Do(req)
+		if err != nil {
+			return "", err
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if err != nil {
+			return "", err
+		}
+
+		nextURL := strings.TrimSpace(string(body))
+
+		if !utils.IsURL(nextURL) {
+			return "", fmt.Errorf("response is not url: %s", nextURL)
+		}
+
+		if strings.Contains(nextURL, "googleusercontent.com") {
+			return nextURL, nil
+		}
+
+		fullURL = nextURL
+	}
+
+	return "", errors.New("[imgRequestAuth] retry limit exceeded")
+}
+
+func downloadImg(c *Client, ctx context.Context, fullUrl string) (string, error) {
+	path := ""
+	var sizePattern = regexp.MustCompile(`=s\d+`)
+	fullUrl = sizePattern.ReplaceAllString(fullUrl, "=s0")
+
+	fullUrl = utils.EnsureAlrYes(fullUrl)
+
+	plainClient := c.httpClientWithProxy(5 * time.Minute)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", fullUrl, nil)
+
+	req.Header = buildBaseHeader(c.cookieHeader)
+
+	resp, err := plainClient.Do(req)
+
+	if err != nil {
+		return path, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return path, fmt.Errorf("http status: %d", resp.StatusCode)
+	}
+
+	imgBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return path, err
+	}
+
+	if err := os.MkdirAll(filepath.Join("data", "images"), 0755); err != nil {
+		return path, fmt.Errorf("create image data directory: %w", err)
+	}
+	extension := filepath.Ext(req.URL.Path)
+	if extension == "" {
+		extension = "." + strings.TrimPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "image/")
+		if extension == "." {
+			extension = ".img"
+		}
+	}
+	fileName := uuid.NewString() + extension
+	path = filepath.Join("data", "images", fileName)
+	if err := os.WriteFile(path, imgBytes, 0644); err != nil {
+		return "", fmt.Errorf("save image: %w", err)
+	}
+
+	return path, nil
+}
+
+var (
+	modelIDRegex          = regexp.MustCompile(`gemini-[a-zA-Z0-9.-]+`)
+	validModelPrefixRegex = regexp.MustCompile(`^gemini-(\d|advanced)`)
+	detailImgUrlRegex     = regexp.MustCompile(`https://[^\s"'\\]+googleusercontent\.com[^\s"'\\\]]*`)
+)

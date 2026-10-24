@@ -3,12 +3,14 @@ package utils
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"mime"
 	"net/http"
-	"strconv"
+	"net/url"
 	"strings"
 	"time"
 
@@ -346,6 +348,51 @@ func ImageURLToBase64(imageURL string, num int) (string, []byte, error) {
 		contentType = http.DetectContentType(data)
 	}
 
-	fmt.Println("contentType:" + contentType + " len :" + strconv.Itoa(len(data)))
 	return contentType, data, nil
+}
+
+func EnsureAlrYes(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+
+	q := u.Query()
+	if q.Get("alr") == "" {
+		q.Set("alr", "yes")
+		u.RawQuery = q.Encode()
+	}
+
+	return u.String()
+}
+
+func IsURL(s string) bool {
+	u, err := url.ParseRequestURI(s)
+	if err != nil {
+		return false
+	}
+
+	return u.Scheme != "" && u.Host != ""
+}
+
+const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+func randomPart(length int) string {
+	b := make([]byte, length)
+
+	for i := range b {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			panic(err)
+		}
+		b[i] = charset[n.Int64()]
+	}
+
+	return string(b)
+}
+
+func GenerateCID() string {
+	str := randomPart(6)
+
+	return str + str + str[:4]
 }
