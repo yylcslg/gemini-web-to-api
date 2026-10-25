@@ -82,7 +82,7 @@ from gemini.google.com:
 
 The request is never retried. If the stream ends without a track, the bridge
 polls the conversation (`hNvQHb`) until an audio card appears, then downloads
-it with the session cookies and `authuser=<GEMINI_AUTH_USER>`.
+it with the session cookies and `authuser=<gemini.auth_user>`.
 
 **Status:** the request format is verified against the web client. The audio
 card format in the reply could not be observed yet (Gemini Web did not return

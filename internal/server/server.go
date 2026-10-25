@@ -57,15 +57,18 @@ func HealthCheck(c fiber.Ctx) error {
 }
 
 // apiKeyMiddleware requires "Authorization: Bearer <SK>" on every route
-// except the generated-image files under /data/images/.
+// except /health, POST /v1/addAccount and the generated-image files under
+// /data/images/.
 func apiKeyMiddleware(cfg *configs.Config, log *zap.Logger) fiber.Handler {
 	expected := strings.TrimSpace(cfg.Server.APIKey)
 	if expected == "" {
 		log.Warn("SK is not set; every API endpoint will reject requests")
 	}
 	return func(c fiber.Ctx) error {
-		// Generated images are served to <img> tags and cannot carry an Authorization header.
-		if strings.HasPrefix(c.Path(), "/data/images/") {
+		// /health is polled by container healthchecks and /v1/addAccount is guarded
+		// by the add_key in its body; neither can send a bearer token. Generated
+		// images are served to <img> tags and cannot carry an Authorization header.
+		if p := c.Path(); p == "/health" || p == "/v1/addAccount" || strings.HasPrefix(p, "/data/images/") {
 			return c.Next()
 		}
 		token, ok := strings.CutPrefix(strings.TrimSpace(c.Get(fiber.HeaderAuthorization)), "Bearer ")
@@ -98,7 +101,7 @@ func Register404Handler(app *fiber.App) {
 // RegisterFiberLifecycle registers the Fiber app lifecycle hooks
 func RegisterFiberLifecycle(lc fx.Lifecycle, app *fiber.App, cfg *configs.Config, log *zap.Logger) {
 	port := cfg.Server.Port
-	address := fmt.Sprintf(":%s", port)
+	address := fmt.Sprintf(":%d", port)
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {

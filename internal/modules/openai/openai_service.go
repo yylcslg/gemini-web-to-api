@@ -243,10 +243,14 @@ func (s *OpenAIService) CreateImageGeneration(ctx context.Context, req dto.Image
 					s.log.Error("convert thumbnail to url failed", zap.Error(err))
 					item.URL = image.URL
 				}
-				if localURL, saveErr := providers.DownloadImageToLocal(ctx, client, item.URL); saveErr == nil {
-					item.URL = localURL
-				} else {
-					s.log.Warn("save generated image locally failed", zap.Error(saveErr))
+				// ThumbnailToUrl already saved the file under /data/images. Only fall
+				// back to downloading when the returned URL is still remotely hosted.
+				if !strings.Contains(item.URL, "/data/images/") {
+					if localURL, saveErr := providers.DownloadImageToLocal(ctx, client, item.URL); saveErr == nil {
+						item.URL = localURL
+					} else {
+						s.log.Warn("save generated image locally failed", zap.Error(saveErr))
+					}
 				}
 
 			}

@@ -4,13 +4,9 @@ services:
     container_name: app
     ports:
       - "4981:4981"
-    env_file:
-      - .env
-    environment:
-      - PORT=4981
-      - APP_ENV=production
     restart: unless-stopped
     volumes:
+      - ./config.yml:/home/appuser/config.yml:ro
       - ./.cookies:/home/appuser/.cookies
     tmpfs:
       - /tmp

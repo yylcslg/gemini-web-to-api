@@ -1,0 +1,45 @@
+# Gemini Web To API configuration.
+# Copy this file to config.yml and fill in the secrets. config.yml is ignored
+# by git because it contains credentials.
+
+log_level: info
+
+server:
+  port: 4981
+  # Required on every API endpoint except /health and /v1/addAccount:
+  # Authorization: Bearer <sk>
+  sk: ""
+  # Required in the POST /v1/addAccount body as {"add_key": "..."}
+  add_key: ""
+  # Public origin for generated image links. Leave empty to derive it from the
+  # outbound IP and server.port.
+  base_url: ""
+
+rate_limit:
+  enabled: true
+  window_ms: 60000
+  max_requests: 30
+
+gemini:
+  # Optional HTTP(S) proxy for all Gemini outbound requests.
+  proxy: ""
+  # Accounts are added through POST /v1/addAccount and stored here.
+  account_dir: data/db
+  # Cookie rotation interval in minutes (minimum 10).
+  refresh_interval: 1440
+  max_retries: 3
+  temporary: false
+  # Legacy single account. Leave empty and use POST /v1/addAccount instead.
+  # auth_user must stay quoted, for example "2" for /u/2/app.
+  auth_user: ""
+  cookies: ""
+
+claude:
+  api_key: ""
+  model: ""
+  cookies: ""
+
+openai:
+  api_key: ""
+  model: ""
+  cookies: ""

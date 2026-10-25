@@ -71,21 +71,16 @@
 2. Press `F12` → **Network**, reload Gemini, and select a
    `batchexecute?rpcids=otAQ7b` request
 3. Copy its complete `Cookie` request header. If the request URL contains an
-   account slot such as `/u/2/`, also use `GEMINI_AUTH_USER="2"` below.
+   account slot such as `/u/2/`, also use `gemini.auth_user: "2"` below.
 
 **Step 2 — Run**
 
+Create a `config.yml` from [config.example.yml](config.example.yml) and fill in
+`server.sk`, `server.add_key` and (optionally) `gemini.cookies`, then mount it:
+
 ```bash
 docker run -d -p 4981:4981 \
-  -e GEMINI_COOKIES="your_complete_cookie_header" \
-  -e GEMINI_AUTH_USER="2" \
-  -e GEMINI_REFRESH_INTERVAL=1440 \
-  -e GEMINI_MAX_RETRIES=3 \
-  -e GEMINI_TEMPORARY=false \
-  -e APP_ENV=production \
-  -e RATE_LIMIT_ENABLED=true \
-  -e RATE_LIMIT_WINDOW_MS=60000 \
-  -e RATE_LIMIT_MAX_REQUESTS=10 \
+  -v $(pwd)/config.yml:/home/appuser/config.yml:ro \
   -v ./cookies:/home/appuser/.cookies \
   --tmpfs /tmp:rw,size=512m \
   --tmpfs /home/appuser/.cache:rw,size=256m \
@@ -109,36 +104,37 @@ git clone https://github.com/ntthanh2603/gemini-web-to-api.git
 cd gemini-web-to-api
 ```
 
-**Step 2 — Get your cookies and configure `.env`**
+**Step 2 — Get your cookies and configure `config.yml`**
 
 > [!WARNING]
-> Keep these values secure and **never commit your `.env` file** — it contains credentials that provide access to your Google account.
+> Keep these values secure and **never commit your `config.yml` file** — it contains credentials that provide access to your Google account. `config.yml` is already listed in `.gitignore`.
 
 1. Go to [gemini.google.com](https://gemini.google.com) and sign in
 2. Press `F12` → **Network**, reload Gemini, and select a
    `batchexecute?rpcids=otAQ7b` request
-3. Copy its complete `Cookie` request header into `GEMINI_COOKIES`.
-4. Match `GEMINI_AUTH_USER` to the request URL. For example, use `2` when the
+3. Copy its complete `Cookie` request header into `gemini.cookies`.
+4. Match `gemini.auth_user` to the request URL. For example, use `"2"` when the
    URL contains `/u/2/`; leave it empty when there is no `/u/<number>/`.
    Always take the cookie and account slot from the same browser tab.
-5. Create your `.env` from the example:
+5. Create your config from the example:
 
    ```bash
-   cp .env.example .env
+   cp config.example.yml config.yml
    ```
 
-6. Paste the values into `.env`:
+6. Fill in the values:
 
-   ```env
-   GEMINI_COOKIES=your_complete_cookie_header
-   GEMINI_AUTH_USER=2
-   GEMINI_REFRESH_INTERVAL=1440
-   GEMINI_MAX_RETRIES=3
-   GEMINI_TEMPORARY=false
-   APP_ENV=production
-   RATE_LIMIT_ENABLED=true
-   RATE_LIMIT_WINDOW_MS=60000
-   RATE_LIMIT_MAX_REQUESTS=10
+   ```yaml
+   server:
+     sk: "sk-your-api-key"
+     add_key: "your-add-account-key"
+
+   gemini:
+     auth_user: "2"
+     cookies: "your_complete_cookie_header"
+     refresh_interval: 1440
+     max_retries: 3
+     temporary: false
    ```
 
 **Step 3 — Run**
@@ -151,7 +147,7 @@ Pick whichever method suits your setup:
 | 🐹 Go direct       | `go run cmd/server/main.go`    | [Go 1.21+](https://golang.org/dl/)                                                          |
 | ⚡ Task (dev mode) | `task dev`                     | [Task](https://taskfile.dev) + [Air](https://github.com/air-verse/air) (`task install-air`) |
 
-> `task dev` runs the server with **hot reload**: Air rebuilds and restarts it whenever a `.go`, `.json` or `.env` file changes (config in `.air.toml`).
+> `task dev` runs the server with **hot reload**: Air rebuilds and restarts it whenever a `.go`, `.json` or `config.yml` file changes (config in `.air.toml`).
 
 **Done!** Jump to [Test it](#-test-it). 🎉
 
@@ -162,6 +158,7 @@ Pick whichever method suits your setup:
 ```bash
 curl -X POST http://localhost:4981/openai/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-your-api-key" \
   -d '{"model": "gemini-advanced", "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
@@ -192,21 +189,31 @@ See [Music generation](docs/music.md) and the [OpenAI](examples/openai_music_cli
 
 ## 🛠️ Configuration
 
-### Environment Variables
+The server reads `config.yml` from the working directory. `CONFIG_FILE` can point
+to another path, which is handy for containers. Omitted keys fall back to the
+defaults below.
 
-| Variable                  | Required | Default | Description                                                      |
-| ------------------------- | -------- | ------- | ---------------------------------------------------------------- |
-| `GEMINI_COOKIES`          | ✅ Yes   | —       | Complete Cookie request header copied from the Gemini Web tab    |
-| `GEMINI_AUTH_USER`        | ❌ No    | —       | Google account slot from the Gemini URL, e.g. `2` for `/u/2/app` |
-| `GEMINI_REFRESH_INTERVAL` | ❌ No    | `1440`  | Cookie rotation interval in minutes (minimum `10`), see below    |
-| `GEMINI_MAX_RETRIES`      | ❌ No    | `3`     | Max retry attempts when an API call fails                        |
-| `GEMINI_TEMPORARY`        | ❌ No    | `false` | Enable stateless/incognito mode for all requests                 |
-| `PORT`                    | ❌ No    | `4981`  | Server port                                                      |
-| `RATE_LIMIT_ENABLED`      | ❌ No    | `false` | Enable or disable rate limiting                                  |
-| `RATE_LIMIT_WINDOW_MS`    | ❌ No    | `60000` | Rate limit time window in milliseconds                           |
-| `RATE_LIMIT_MAX_REQUESTS` | ❌ No    | `10`    | Maximum number of requests allowed per time window               |
+### `config.yml`
 
-### Avoiding Gemini blocks (`GEMINI_REFRESH_INTERVAL`)
+| Key                       | Required | Default   | Description                                                   |
+| ------------------------- | -------- | --------- | ------------------------------------------------------------- |
+| `server.port`             | ❌ No    | `4981`    | HTTP listen port                                              |
+| `server.sk`               | ✅ Yes   | —         | Bearer token for every endpoint except `/health` and `/v1/addAccount` |
+| `server.add_key`          | ✅ Yes   | —         | Value required in the `POST /v1/addAccount` body as `add_key` |
+| `server.base_url`         | ❌ No    | derived   | Public origin for generated image links                       |
+| `log_level`               | ❌ No    | `info`    | `debug`, `info`, `warn` or `error`                            |
+| `rate_limit.enabled`      | ❌ No    | `false`   | Enable or disable rate limiting                               |
+| `rate_limit.window_ms`    | ❌ No    | `60000`   | Rate limit time window in milliseconds                        |
+| `rate_limit.max_requests` | ❌ No    | `10`      | Maximum number of requests allowed per time window            |
+| `gemini.proxy`            | ❌ No    | —         | Optional HTTP(S) proxy for Gemini outbound requests           |
+| `gemini.account_dir`      | ❌ No    | `data/db` | Where accounts added through `/v1/addAccount` are stored      |
+| `gemini.refresh_interval` | ❌ No    | `1440`    | Cookie rotation interval in minutes (minimum `10`), see below |
+| `gemini.max_retries`      | ❌ No    | `3`       | Max retry attempts when an API call fails                     |
+| `gemini.temporary`        | ❌ No    | `false`   | Enable stateless/incognito mode for all requests              |
+| `gemini.auth_user`        | ❌ No    | —         | Legacy account slot, e.g. `"2"` for `/u/2/app`                |
+| `gemini.cookies`          | ❌ No    | —         | Legacy single-account Cookie header (prefer `/v1/addAccount`) |
+
+### Avoiding Gemini blocks (`gemini.refresh_interval`)
 
 The server periodically rotates the `__Secure-1PSIDTS` cookie and refreshes the
 Gemini session token to keep it alive. Doing this too often looks automated, and
@@ -215,15 +222,9 @@ Google may answer with `429`, "unusual traffic" pages or force you to sign in ag
 - The default is **1440 minutes (24h)**. Values below **10** are raised to 10; `0` or
   negative values fall back to the default.
 - If you still get blocked, keep the default (or go higher) and also keep
-  `RATE_LIMIT_ENABLED=true` with a modest `RATE_LIMIT_MAX_REQUESTS`.
+  `rate_limit.enabled: true` with a modest `rate_limit.max_requests`.
 - If the session starts expiring between rotations (logs show
   `marking client unhealthy`), lower it again or copy a fresh cookie header.
-
-### Configuration Priority
-
-1. **Environment Variables** (highest priority)
-2. **`.env` file**
-3. **Defaults** (lowest priority)
 
 ---
 
@@ -268,7 +269,7 @@ Set `reasoning_effort` to `low`, `medium`, or `high` in
 {
   "model": "gemini-3.6-flash",
   "reasoning_effort": "medium",
-  "messages": [{"role": "user", "content": "Explain your answer."}]
+  "messages": [{ "role": "user", "content": "Explain your answer." }]
 }
 ```
 

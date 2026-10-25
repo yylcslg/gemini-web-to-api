@@ -6,57 +6,58 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/joho/godotenv"
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Gemini    GeminiConfig
-	Claude    ClaudeConfig
-	OpenAI    OpenAIConfig
-	Server    ServerConfig
-	RateLimit RateLimitConfig
-	LogLevel  string
+	Gemini    GeminiConfig    `yaml:"gemini"`
+	Claude    ClaudeConfig    `yaml:"claude"`
+	OpenAI    OpenAIConfig    `yaml:"openai"`
+	Server    ServerConfig    `yaml:"server"`
+	RateLimit RateLimitConfig `yaml:"rate_limit"`
+	LogLevel  string          `yaml:"log_level"`
 }
 
 type RateLimitConfig struct {
-	Enabled     bool
-	WindowMs    int
-	MaxRequests int
+	Enabled     bool `yaml:"enabled"`
+	WindowMs    int  `yaml:"window_ms"`
+	MaxRequests int  `yaml:"max_requests"`
 }
 
 type GeminiConfig struct {
-	Proxy           string
-	Secure1PSID     string
-	Secure1PSIDTS   string
-	AuthUser        string
-	RefreshInterval int
-	MaxRetries      int
-	Cookies         string
-	Temporary       bool
-	AccountDir      string
+	Proxy           string `yaml:"proxy"`
+	Secure1PSID     string `yaml:"-"` // derived from Cookies
+	Secure1PSIDTS   string `yaml:"-"` // derived from Cookies
+	AuthUser        string `yaml:"auth_user"`
+	RefreshInterval int    `yaml:"refresh_interval"`
+	MaxRetries      int    `yaml:"max_retries"`
+	Cookies         string `yaml:"cookies"` // optional legacy single-account header
+	Temporary       bool   `yaml:"temporary"`
+	AccountDir      string `yaml:"account_dir"`
 }
 
 type ClaudeConfig struct {
-	APIKey  string
-	Model   string
-	Cookies string
+	APIKey  string `yaml:"api_key"`
+	Model   string `yaml:"model"`
+	Cookies string `yaml:"cookies"`
 }
 
 type OpenAIConfig struct {
-	APIKey  string
-	Model   string
-	Cookies string
+	APIKey  string `yaml:"api_key"`
+	Model   string `yaml:"model"`
+	Cookies string `yaml:"cookies"`
 }
 
 type ServerConfig struct {
-	Port    string
-	APIKey  string // SK: required on every API endpoint
-	AddKey  string // ADD_KEY/add_key: required in the POST /v1/addAccount body
-	BaseURL string // BASE_URL/base_url: public origin for generated asset links
+	Port    int    `yaml:"port"`
+	APIKey  string `yaml:"sk"`      // required on every API endpoint
+	AddKey  string `yaml:"add_key"` // required in the POST /v1/addAccount body
+	BaseURL string `yaml:"base_url"`
 }
 
 const (
-	defaultServerPort            = "4981"
+	defaultConfigFile            = "config.yml"
+	defaultServerPort            = 4981
 	defaultGeminiRefreshInterval = 1440
 	// Rotating cookies more often than this looks automated to Google and
 	// tends to get the session flagged or blocked.
@@ -64,65 +65,73 @@ const (
 	defaultGeminiMaxRetries  = 3
 	defaultGeminiAccountDir  = "data/db"
 	defaultLogLevel          = "info"
+	defaultRateLimitWindowMs = 60000
+	defaultRateLimitMax      = 10
 )
 
+// New loads config.yml from the working directory. CONFIG_FILE overrides the
+// path, which is useful for container mounts and tests.
 func New() (*Config, error) {
-	// Load .env file if it exists
-	_ = godotenv.Load()
-
-	var cfg Config
-
-	// Server
-	cfg.Server.Port = getEnv("PORT", defaultServerPort)
-	// SK is required on every API endpoint.
-	cfg.Server.APIKey = strings.TrimSpace(getEnv("SK", ""))
-	// ADD_KEY guards the addAccount request body; add_key is the legacy spelling.
-	cfg.Server.AddKey = strings.TrimSpace(getEnv("ADD_KEY", ""))
-	if cfg.Server.AddKey == "" {
-		cfg.Server.AddKey = strings.TrimSpace(getEnv("add_key", ""))
+	path := strings.TrimSpace(os.Getenv("CONFIG_FILE"))
+	if path == "" {
+		path = defaultConfigFile
 	}
-	// BASE_URL is the public origin used for generated image links; empty means
-	// derive it from the server IP and PORT.
-	cfg.Server.BaseURL = strings.TrimSpace(getEnv("BASE_URL", ""))
-	if cfg.Server.BaseURL == "" {
-		cfg.Server.BaseURL = strings.TrimSpace(getEnv("base_url", ""))
+	return Load(path)
+}
+
+// Load reads and validates one YAML configuration file.
+func Load(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 
-	// General
-	cfg.LogLevel = getEnv("LOG_LEVEL", defaultLogLevel)
-
-	// Rate Limit
-	cfg.RateLimit.Enabled = getEnvBool("RATE_LIMIT_ENABLED", false)
-	cfg.RateLimit.WindowMs = getEnvInt("RATE_LIMIT_WINDOW_MS", 60000)
-	cfg.RateLimit.MaxRequests = getEnvInt("RATE_LIMIT_MAX_REQUESTS", 10)
-
-	// Gemini
-	cfg.Gemini.Proxy = strings.TrimSpace(os.Getenv("GEMINI_PROXY"))
-	cfg.Gemini.Cookies = os.Getenv("GEMINI_COOKIES")
-	cfg.Gemini.AuthUser = strings.TrimSpace(os.Getenv("GEMINI_AUTH_USER"))
-	cfg.Gemini.Secure1PSID = cookieValue(cfg.Gemini.Cookies, "__Secure-1PSID")
-	cfg.Gemini.Secure1PSIDTS = cookieValue(cfg.Gemini.Cookies, "__Secure-1PSIDTS")
-	cfg.Gemini.RefreshInterval = getEnvInt("GEMINI_REFRESH_INTERVAL", defaultGeminiRefreshInterval)
-	if cfg.Gemini.RefreshInterval <= 0 {
-		cfg.Gemini.RefreshInterval = defaultGeminiRefreshInterval
-	} else if cfg.Gemini.RefreshInterval < minGeminiRefreshInterval {
-		cfg.Gemini.RefreshInterval = minGeminiRefreshInterval
+	cfg := Config{
+		LogLevel: defaultLogLevel,
+		Server:   ServerConfig{Port: defaultServerPort},
+		RateLimit: RateLimitConfig{
+			WindowMs:    defaultRateLimitWindowMs,
+			MaxRequests: defaultRateLimitMax,
+		},
+		Gemini: GeminiConfig{
+			RefreshInterval: defaultGeminiRefreshInterval,
+			MaxRetries:      defaultGeminiMaxRetries,
+			AccountDir:      defaultGeminiAccountDir,
+		},
 	}
-	cfg.Gemini.MaxRetries = getEnvInt("GEMINI_MAX_RETRIES", defaultGeminiMaxRetries)
-	cfg.Gemini.Temporary = getEnvBool("GEMINI_TEMPORARY", false)
-	cfg.Gemini.AccountDir = getEnv("GEMINI_ACCOUNT_DIR", defaultGeminiAccountDir)
-	if cfg.Gemini.AuthUser != "" {
-		if n, err := strconv.Atoi(cfg.Gemini.AuthUser); err != nil || n < 0 {
-			return nil, fmt.Errorf("invalid GEMINI_AUTH_USER value: %q (must be a non-negative account slot)", cfg.Gemini.AuthUser)
-		}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 
-	// Validate configuration
+	cfg.normalize()
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
 	return &cfg, nil
+}
+
+func (c *Config) normalize() {
+	c.LogLevel = strings.TrimSpace(c.LogLevel)
+	c.Server.APIKey = strings.TrimSpace(c.Server.APIKey)
+	c.Server.AddKey = strings.TrimSpace(c.Server.AddKey)
+	c.Server.BaseURL = strings.TrimRight(strings.TrimSpace(c.Server.BaseURL), "/")
+	c.Gemini.Proxy = strings.TrimSpace(c.Gemini.Proxy)
+	c.Gemini.AuthUser = strings.TrimSpace(c.Gemini.AuthUser)
+	c.Gemini.AccountDir = strings.TrimSpace(c.Gemini.AccountDir)
+	if c.Gemini.AccountDir == "" {
+		c.Gemini.AccountDir = defaultGeminiAccountDir
+	}
+
+	c.Gemini.Secure1PSID = cookieValue(c.Gemini.Cookies, "__Secure-1PSID")
+	c.Gemini.Secure1PSIDTS = cookieValue(c.Gemini.Cookies, "__Secure-1PSIDTS")
+
+	if c.Gemini.RefreshInterval <= 0 {
+		c.Gemini.RefreshInterval = defaultGeminiRefreshInterval
+	} else if c.Gemini.RefreshInterval < minGeminiRefreshInterval {
+		c.Gemini.RefreshInterval = minGeminiRefreshInterval
+	}
 }
 
 func cookieValue(header, wanted string) string {
@@ -135,54 +144,27 @@ func cookieValue(header, wanted string) string {
 	return ""
 }
 
-// Validate checks if the configuration has required values
+// Validate checks if the configuration has required values.
 func (c *Config) Validate() error {
-	// GEMINI_COOKIES is a legacy single-account fallback. Accounts are normally
-	// added through POST /v1/addAccount and stored in GEMINI_ACCOUNT_DIR, so the
+	// gemini.cookies is a legacy single-account fallback. Accounts are normally
+	// added through POST /v1/addAccount and stored in gemini.account_dir, so the
 	// server may start with zero accounts.
 	if strings.TrimSpace(c.Gemini.Cookies) != "" && (c.Gemini.Secure1PSID == "" || c.Gemini.Secure1PSIDTS == "") {
-		return fmt.Errorf("GEMINI_COOKIES must contain __Secure-1PSID and __Secure-1PSIDTS")
+		return fmt.Errorf("gemini.cookies must contain __Secure-1PSID and __Secure-1PSIDTS")
 	}
 
-	// Check Server port is valid
-	if c.Server.Port == "" {
+	if c.Gemini.AuthUser != "" {
+		if n, err := strconv.Atoi(c.Gemini.AuthUser); err != nil || n < 0 {
+			return fmt.Errorf("invalid gemini.auth_user value: %q (must be a non-negative account slot)", c.Gemini.AuthUser)
+		}
+	}
+
+	if c.Server.Port == 0 {
 		c.Server.Port = defaultServerPort
 	}
-
-	if _, err := strconv.Atoi(c.Server.Port); err != nil {
-		return fmt.Errorf("invalid PORT value: %q (must be a number)", c.Server.Port)
+	if c.Server.Port < 1 || c.Server.Port > 65535 {
+		return fmt.Errorf("invalid server.port value: %d (must be between 1 and 65535)", c.Server.Port)
 	}
 
 	return nil
-}
-
-func getEnv(key, defaultValue string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
-	}
-	return defaultValue
-}
-
-func getEnvInt(key string, defaultValue int) int {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-func getEnvBool(key string, defaultValue bool) bool {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-	value, err := strconv.ParseBool(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-	return value
 }

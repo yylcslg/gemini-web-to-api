@@ -34,8 +34,8 @@ func TestLiveAPIContracts(t *testing.T) {
 	}
 
 	root := repositoryRoot(t)
-	if _, err := os.Stat(filepath.Join(root, ".env")); err != nil {
-		t.Skip("root .env is required for live Gemini E2E tests")
+	if _, err := os.Stat(filepath.Join(root, "config.yml")); err != nil {
+		t.Skip("root config.yml is required for live Gemini E2E tests")
 	}
 	baseURL, stop := startServer(t, root)
 	defer stop()

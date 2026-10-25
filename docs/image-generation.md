@@ -179,9 +179,9 @@ The implementation has been verified with:
 
 ## Security
 
-`GEMINI_COOKIES` grants access to the Google session used by the bridge.
+`gemini.cookies` grants access to the Google session used by the bridge.
 
-- Never commit cookies or a populated `.env` file.
+- Never commit cookies or a populated `config.yml` file.
 - Bind the service to localhost unless you add your own authentication layer.
 - Do not publish logs, HAR files or browser profiles from authenticated sessions.
 - Use restrictive file permissions for cookie caches.
@@ -192,7 +192,7 @@ A safer local Docker port binding is:
 ```bash
 docker run -d \
   -p 127.0.0.1:4981:4981 \
-  --env-file .env \
+  -v $(pwd)/config.yml:/home/appuser/config.yml:ro \
   --name gemini-web-to-api \
   gemini-web-to-api:local
 ```

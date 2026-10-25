@@ -19,6 +19,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -153,10 +154,10 @@ func assetBaseURL(cfg *configs.Config) string {
 		_ = conn.Close()
 	}
 	port := cfg.Server.Port
-	if port == "" {
-		port = "4981"
+	if port == 0 {
+		port = 4981
 	}
-	return "http://" + net.JoinHostPort(ip, port)
+	return "http://" + net.JoinHostPort(ip, strconv.Itoa(port))
 }
 
 func (c *Client) Init(ctx context.Context) error {
@@ -1817,7 +1818,9 @@ func downloadImg(c *Client, ctx context.Context, fullUrl string) (string, error)
 		return path, err
 	}
 
-	if err := os.MkdirAll(filepath.Join("data", "images"), 0755); err != nil {
+	dateDir := time.Now().Format("20060102")
+	localDir := filepath.Join("data", "images", dateDir)
+	if err := os.MkdirAll(localDir, 0755); err != nil {
 		return path, fmt.Errorf("create image data directory: %w", err)
 	}
 	extension := filepath.Ext(req.URL.Path)
@@ -1828,10 +1831,10 @@ func downloadImg(c *Client, ctx context.Context, fullUrl string) (string, error)
 		}
 	}
 	fileName := uuid.NewString() + extension
-	localPath := filepath.Join("data", "images", fileName)
+	localPath := filepath.Join(localDir, fileName)
 	if err := os.WriteFile(localPath, imgBytes, 0644); err != nil {
 		return "", fmt.Errorf("save image: %w", err)
 	}
 
-	return c.assetBaseURL + "/data/images/" + fileName, nil
+	return c.assetBaseURL + "/data/images/" + dateDir + "/" + fileName, nil
 }

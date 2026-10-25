@@ -366,13 +366,33 @@ func (h *OpenAIController) HandleSpeech(c fiber.Ctx) error {
 	return c.Send(data)
 }
 
+// imagePathSegment validates one path segment of an image URL so it cannot
+// escape data/images.
+func imagePathSegment(raw string) (string, bool) {
+	segment := filepath.Base(strings.TrimSpace(raw))
+	if segment == "" || segment == "." || segment == ".." || segment == string(filepath.Separator) {
+		return "", false
+	}
+	return segment, true
+}
+
 func (h *OpenAIController) HandleGetImage(c fiber.Ctx) error {
-	id := filepath.Base(c.Params("id"))
-	if id == "." || id == string(filepath.Separator) || id == "" {
+	id, ok := imagePathSegment(c.Params("id"))
+	if !ok {
 		return c.SendStatus(fiber.StatusBadRequest)
 	}
 
-	filePath := filepath.Join("data", "images", id)
+	segments := []string{"data", "images"}
+	// The single-segment route has no :date param; only treat it as present when
+	// the raw value is non-empty (filepath.Base("") returns ".").
+	if raw := c.Params("date"); raw != "" {
+		date, ok := imagePathSegment(raw)
+		if !ok {
+			return c.SendStatus(fiber.StatusBadRequest)
+		}
+		segments = append(segments, date)
+	}
+	filePath := filepath.Join(append(segments, id)...)
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {

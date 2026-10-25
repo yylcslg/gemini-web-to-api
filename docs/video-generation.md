@@ -122,7 +122,7 @@ A failed job carries a code (OpenAI `error.code`; Gemini `error.status`):
    batchexecute RPC every 10 seconds without resubmitting the prompt.
 3. The finished reply carries a video card in `candidate[12]` (JSPB field 60) whose
    download URL is on `contribution.usercontent.google.com`. The bridge downloads
-   it with the session cookies and `authuser=<GEMINI_AUTH_USER>`, and checks that
+   it with the session cookies and `authuser=<gemini.auth_user>`, and checks that
    the bytes are an MP4.
 
 ## Limits

@@ -1,9 +1,20 @@
 package configs
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func writeConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yml")
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 func TestCookieValueExtractsAuthFromFullHeader(t *testing.T) {
 	header := "NID=rollout; __Secure-1PSID=account=value; __Secure-1PSIDTS=timestamp; SIDCC=flags"
@@ -15,34 +26,43 @@ func TestCookieValueExtractsAuthFromFullHeader(t *testing.T) {
 	}
 }
 
-func TestNewRejectsInvalidGeminiAuthUser(t *testing.T) {
-	t.Setenv("GEMINI_COOKIES", "__Secure-1PSID=psid; __Secure-1PSIDTS=psidts")
-	t.Setenv("GEMINI_AUTH_USER", "account-two")
-	if _, err := New(); err == nil || !strings.Contains(err.Error(), "GEMINI_AUTH_USER") {
+func TestLoadRejectsInvalidGeminiAuthUser(t *testing.T) {
+	path := writeConfig(t, `
+gemini:
+  auth_user: account-two
+`)
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "gemini.auth_user") {
 		t.Fatalf("expected invalid account slot error, got %v", err)
 	}
 }
 
-func TestNewAllowsMissingGeminiCookies(t *testing.T) {
-	t.Setenv("GEMINI_COOKIES", "")
+func TestLoadAllowsMissingGeminiCookies(t *testing.T) {
 	// Accounts are added through POST /v1/addAccount, so the server must start
-	// without GEMINI_COOKIES.
-	t.Setenv("GEMINI_1PSID", "legacy-psid")
-	t.Setenv("GEMINI_1PSIDTS", "legacy-psidts")
-	if _, err := New(); err != nil {
-		t.Fatalf("expected startup without GEMINI_COOKIES, got %v", err)
+	// without gemini.cookies.
+	path := writeConfig(t, `
+gemini:
+  cookies: ""
+`)
+	if _, err := Load(path); err != nil {
+		t.Fatalf("expected startup without gemini.cookies, got %v", err)
 	}
 
-	t.Setenv("GEMINI_COOKIES", "NID=rollout; __Secure-1PSID=psid")
-	if _, err := New(); err == nil || !strings.Contains(err.Error(), "__Secure-1PSIDTS") {
+	path = writeConfig(t, `
+gemini:
+  cookies: "NID=rollout; __Secure-1PSID=psid"
+`)
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "__Secure-1PSIDTS") {
 		t.Fatalf("expected incomplete Cookie header error, got %v", err)
 	}
 }
 
-func TestNewReadsGeminiProxy(t *testing.T) {
-	t.Setenv("GEMINI_COOKIES", "__Secure-1PSID=psid; __Secure-1PSIDTS=psidts")
-	t.Setenv("GEMINI_PROXY", " http://127.0.0.1:8889 ")
-	cfg, err := New()
+func TestLoadReadsGeminiProxy(t *testing.T) {
+	path := writeConfig(t, `
+gemini:
+  cookies: "__Secure-1PSID=psid; __Secure-1PSIDTS=psidts"
+  proxy: " http://127.0.0.1:8889 "
+`)
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,14 +71,29 @@ func TestNewReadsGeminiProxy(t *testing.T) {
 	}
 }
 
-func TestNewDerivesAuthenticationFromGeminiCookies(t *testing.T) {
-	t.Setenv("GEMINI_COOKIES", "NID=rollout; __Secure-1PSID=psid; __Secure-1PSIDTS=psidts")
-	t.Setenv("GEMINI_AUTH_USER", "2")
-	cfg, err := New()
+func TestLoadDerivesAuthenticationFromGeminiCookies(t *testing.T) {
+	path := writeConfig(t, `
+gemini:
+  cookies: "NID=rollout; __Secure-1PSID=psid; __Secure-1PSIDTS=psidts"
+  auth_user: "2"
+`)
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Gemini.Secure1PSID != "psid" || cfg.Gemini.Secure1PSIDTS != "psidts" || cfg.Gemini.AuthUser != "2" {
 		t.Fatalf("incorrect Gemini config derived from full Cookie header: %#v", cfg.Gemini)
+	}
+}
+
+func TestLoadAppliesDefaults(t *testing.T) {
+	path := writeConfig(t, "log_level: debug\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.Port != defaultServerPort || cfg.Gemini.AccountDir != defaultGeminiAccountDir ||
+		cfg.Gemini.RefreshInterval != defaultGeminiRefreshInterval || cfg.Gemini.MaxRetries != defaultGeminiMaxRetries {
+		t.Fatalf("defaults not applied: %#v", cfg)
 	}
 }
