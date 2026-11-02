@@ -164,7 +164,7 @@ func TestGenerateVideoSubmitsOncePollsAndDownloads(t *testing.T) {
 
 	client := &Client{at: "test-token", cookieHeader: "session=test-cookie", cachedModels: generationTestModels(),
 		language: "en", authUser: "2", log: zap.NewNop(), maxRetries: 3, defaultTemporary: true}
-	result, err := client.GenerateVideo(context.Background(), "A cat", "gemini-pro", VideoAspectLandscape, time.Millisecond)
+	result, err := client.GenerateVideo(context.Background(), "A cat", "gemini-pro", nil,VideoAspectLandscape, time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestGenerateVideoReportsQuotaWithoutPolling(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(body))), Request: r}, nil
 	})
 	client := &Client{at: "test-token", cookieHeader: "c", cachedModels: generationTestModels(), language: "en", log: zap.NewNop()}
-	_, err := client.GenerateVideo(context.Background(), "A cat", "", VideoAspectLandscape, time.Millisecond)
+	_, err := client.GenerateVideo(context.Background(), "A cat", "",nil, VideoAspectLandscape, time.Millisecond)
 	var videoErr *VideoError
 	if !errors.As(err, &videoErr) || videoErr.Code != VideoErrorQuota {
 		t.Fatalf("expected quota error, got %v", err)
@@ -219,7 +219,7 @@ type fakeVideoRun struct {
 	err     error
 }
 
-func (f *fakeVideoRun) generate(ctx context.Context, prompt, model string, aspect VideoAspectRatio) (*VideoResult, error) {
+func (f *fakeVideoRun) generate(ctx context.Context, prompt, model string, images []string, aspect VideoAspectRatio) (*VideoResult, error) {
 	f.model, f.aspect = model, aspect
 	select {
 	case <-f.release:
@@ -254,11 +254,11 @@ func TestVideoJobLifecycle(t *testing.T) {
 	c := NewVideoTestClient([]ModelInfo{{ID: "gemini-flash"}, {ID: "gemini-pro"}}, run.generate)
 	defer c.videoJobStore().close()
 
-	job, err := c.StartVideoJob(" A cat ", "veo-3.0-generate-001", VideoAspectPortrait)
+	job, err := c.StartVideoJob(" A cat ", "veo-3.0-generate-001",nil, VideoAspectPortrait)
 	if err != nil || job.Status != VideoJobInProgress || job.Prompt != "A cat" || job.Model != "gemini-flash" || job.Size() != "720x1280" {
 		t.Fatalf("job=%#v err=%v", job, err)
 	}
-	if _, err := c.StartVideoJob("Another", "", VideoAspectLandscape); !errors.Is(err, ErrVideoBusy) {
+	if _, err := c.StartVideoJob("Another", "", nil, VideoAspectLandscape); !errors.Is(err, ErrVideoBusy) {
 		t.Fatalf("concurrent job must be rejected, got %v", err)
 	}
 	if _, _, err := c.VideoJobContent(job.ID); !errors.Is(err, ErrVideoNotReady) {
@@ -292,7 +292,7 @@ func TestVideoJobFailureKeepsProviderError(t *testing.T) {
 	close(run.release)
 	c := NewVideoTestClient([]ModelInfo{{ID: "gemini-pro"}}, run.generate)
 	defer c.videoJobStore().close()
-	job, err := c.StartVideoJob("A cat", "gemini-pro", VideoAspectLandscape)
+	job, err := c.StartVideoJob("A cat", "gemini-pro", nil, VideoAspectLandscape)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,11 +306,11 @@ func TestVideoJobValidation(t *testing.T) {
 	c := NewVideoTestClient([]ModelInfo{{ID: "gemini-pro"}}, (&fakeVideoRun{release: make(chan struct{})}).generate)
 	defer c.videoJobStore().close()
 	var validationErr *VideoValidationError
-	if _, err := c.StartVideoJob("  ", "", VideoAspectLandscape); !errors.As(err, &validationErr) {
+	if _, err := c.StartVideoJob("  ", "", nil, VideoAspectLandscape); !errors.As(err, &validationErr) {
 		t.Fatalf("empty prompt accepted: %v", err)
 	}
 	var modelErr *ModelSelectionError
-	if _, err := c.StartVideoJob("A cat", "unknown-model", VideoAspectLandscape); !errors.As(err, &modelErr) {
+	if _, err := c.StartVideoJob("A cat", "unknown-model", nil, VideoAspectLandscape); !errors.As(err, &modelErr) {
 		t.Fatalf("unknown model accepted: %v", err)
 	}
 	for _, tc := range []struct {

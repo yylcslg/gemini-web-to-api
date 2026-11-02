@@ -292,7 +292,7 @@ func (s *OpenAIService) CreateVideo(req dto.VideoGenerationRequest) (*dto.Video,
 	if err != nil {
 		return nil, err
 	}
-	job, err := s.client.StartVideoJob(req.Prompt, req.Model, aspect)
+	job, err := s.client.StartVideoJob(req.Prompt, req.Model, req.Images, aspect)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +364,7 @@ func toOpenAIVideo(job providers.VideoJob, now time.Time) *dto.Video {
 		video.Progress = min(95, int(now.Sub(job.CreatedAt).Seconds()*100/expectedVideoSeconds))
 	case providers.VideoJobCompleted:
 		video.Progress = 100
-		video.ContentURL = "/openai/v1/videos/" + id + "/content"
+		video.ContentURL = "/v1/videos/" + id + "/content"
 	}
 	if !job.CompletedAt.IsZero() {
 		completed, expires := job.CompletedAt.Unix(), job.ExpiresAt().Unix()

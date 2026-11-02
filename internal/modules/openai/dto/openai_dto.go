@@ -375,11 +375,12 @@ type ImageGenerationData struct {
 // "16:9" or "9:16". Seconds is accepted for SDK compatibility and ignored:
 // Gemini Web decides the clip length.
 type VideoGenerationRequest struct {
-	Model       string `json:"model,omitempty" form:"model"`
-	Prompt      string `json:"prompt" form:"prompt"`
-	Size        string `json:"size,omitempty" form:"size"`
-	Seconds     string `json:"seconds,omitempty" form:"seconds"`
-	AspectRatio string `json:"aspect_ratio,omitempty" form:"aspect_ratio"`
+	Model       string   `json:"model,omitempty" form:"model"`
+	Images      []string `json:"images,omitempty" form:"images"`
+	Prompt      string   `json:"prompt" form:"prompt"`
+	Size        string   `json:"size,omitempty" form:"size"`
+	Seconds     string   `json:"seconds,omitempty" form:"seconds"`
+	AspectRatio string   `json:"aspect_ratio,omitempty" form:"aspect_ratio"`
 }
 
 // Video mirrors the OpenAI Videos API object, plus Gemini-specific fields.

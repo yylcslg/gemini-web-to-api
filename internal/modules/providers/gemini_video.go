@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gemini-web-to-api/internal/commons/utils"
 	"io"
 	"math/rand"
 	"net/http"
@@ -307,11 +308,31 @@ func classifyVideoReply(text string) *VideoError {
 // GenerateVideo submits one video request with the native "Videos" tool, then
 // polls the same conversation until the video card appears and downloads it.
 // The prompt is never resubmitted, so one call consumes at most one quota unit.
-func (c *Client) GenerateVideo(ctx context.Context, prompt, model string, aspect VideoAspectRatio, pollInterval time.Duration) (*VideoResult, error) {
+func (c *Client) GenerateVideo(ctx context.Context, prompt, model string, images []string, aspect VideoAspectRatio, pollInterval time.Duration) (*VideoResult, error) {
 	if pollInterval <= 0 {
 		pollInterval = defaultVideoPollInterval
 	}
-	response, err := c.GenerateContent(ctx, prompt, WithModel(model), WithVideoGeneration(aspect))
+
+	var response *Response
+	var err error
+	if len(images) > 0 {
+		inputFiles := make([]InputFile, 0, len(images))
+		for i, imageURL := range images {
+			contentType, byteDatas, err := utils.ImageURLToBase64(imageURL, i+1)
+			if err != nil {
+				return nil, fmt.Errorf("convert input image %d: %w", i+1, err)
+			}
+			inputFiles = append(inputFiles, InputFile{
+				Name:     "image_" + strconv.Itoa(i+1) + utils.GetExtension(contentType),
+				Data:     byteDatas,
+				MimeType: contentType,
+			})
+		}
+		response, err = c.GenerateContent(ctx, prompt, WithInputFiles(inputFiles), WithModel(model), WithVideoGeneration(aspect))
+	} else {
+		response, err = c.GenerateContent(ctx, prompt, WithModel(model), WithVideoGeneration(aspect))
+	}
+
 	if err != nil {
 		var modelErr *ModelSelectionError
 		if errors.As(err, &modelErr) {
@@ -720,7 +741,7 @@ func (j VideoJob) ExpiresAt() time.Time {
 }
 
 // VideoGenerateFunc produces one video; it is GenerateVideo in production.
-type VideoGenerateFunc func(ctx context.Context, prompt, model string, aspect VideoAspectRatio) (*VideoResult, error)
+type VideoGenerateFunc func(ctx context.Context, prompt, model string, images []string, aspect VideoAspectRatio) (*VideoResult, error)
 
 type videoJobEntry struct {
 	job  VideoJob
@@ -748,8 +769,8 @@ func newVideoJobStore(generate VideoGenerateFunc) *videoJobStore {
 
 func (c *Client) videoJobStore() *videoJobStore {
 	c.videoJobsOnce.Do(func() {
-		c.videoJobs = newVideoJobStore(func(ctx context.Context, prompt, model string, aspect VideoAspectRatio) (*VideoResult, error) {
-			return c.GenerateVideo(ctx, prompt, model, aspect, 0)
+		c.videoJobs = newVideoJobStore(func(ctx context.Context, prompt, model string, images []string, aspect VideoAspectRatio) (*VideoResult, error) {
+			return c.GenerateVideo(ctx, prompt, model, images, aspect, 0)
 		})
 	})
 	return c.videoJobs
@@ -797,7 +818,7 @@ func ParseVideoAspect(size, aspectRatio string) (VideoAspectRatio, error) {
 }
 
 // StartVideoJob validates the request and generates the video in the background.
-func (c *Client) StartVideoJob(prompt, model string, aspect VideoAspectRatio) (VideoJob, error) {
+func (c *Client) StartVideoJob(prompt, model string, images []string, aspect VideoAspectRatio) (VideoJob, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return VideoJob{}, &VideoValidationError{Message: "prompt is required"}
@@ -817,7 +838,7 @@ func (c *Client) StartVideoJob(prompt, model string, aspect VideoAspectRatio) (V
 	if err != nil {
 		return VideoJob{}, err
 	}
-	return c.videoJobStore().start(prompt, resolved.ID, aspect)
+	return c.videoJobStore().start(prompt, resolved.ID, images, aspect)
 }
 
 // GetVideoJob returns the current state of a job.
@@ -840,7 +861,7 @@ func (c *Client) DeleteVideoJob(id string) error {
 	return c.videoJobStore().delete(id)
 }
 
-func (s *videoJobStore) start(prompt, model string, aspect VideoAspectRatio) (VideoJob, error) {
+func (s *videoJobStore) start(prompt, model string, images []string, aspect VideoAspectRatio) (VideoJob, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pruneLocked(time.Now())
@@ -856,11 +877,11 @@ func (s *videoJobStore) start(prompt, model string, aspect VideoAspectRatio) (Vi
 	s.jobs[id] = entry
 	s.active++
 	s.wg.Add(1)
-	go s.run(id, prompt, model, aspect)
+	go s.run(id, prompt, model, images, aspect)
 	return entry.job, nil
 }
 
-func (s *videoJobStore) run(id, prompt, model string, aspect VideoAspectRatio) {
+func (s *videoJobStore) run(id, prompt, model string, images []string, aspect VideoAspectRatio) {
 	defer s.wg.Done()
 	ctx, cancel := context.WithTimeout(s.root, s.timeout)
 	defer cancel()
@@ -873,7 +894,7 @@ func (s *videoJobStore) run(id, prompt, model string, aspect VideoAspectRatio) {
 				err = fmt.Errorf("video worker panic: %v", r)
 			}
 		}()
-		result, err = s.generate(ctx, prompt, model, aspect)
+		result, err = s.generate(ctx, prompt, model, images, aspect)
 	}()
 
 	s.mu.Lock()

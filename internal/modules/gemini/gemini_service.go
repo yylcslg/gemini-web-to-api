@@ -402,7 +402,7 @@ func (s *GeminiService) StartVideoOperation(model string, req dto.PredictLongRun
 	if err != nil {
 		return nil, err
 	}
-	job, err := s.client.StartVideoJob(instance.Prompt, model, aspect)
+	job, err := s.client.StartVideoJob(instance.Prompt, model, nil,aspect)
 	if err != nil {
 		return nil, err
 	}

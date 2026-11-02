@@ -309,12 +309,12 @@ func (p *AccountPool) Pick() *Client {
 
 // StartVideoJob starts a job on a random account and remembers which client
 // owns it, so polling and downloads reach the same account.
-func (p *AccountPool) StartVideoJob(prompt, model string, aspect VideoAspectRatio) (VideoJob, error) {
+func (p *AccountPool) StartVideoJob(prompt, model string, images []string, aspect VideoAspectRatio) (VideoJob, error) {
 	client := p.pick()
 	if client == nil {
 		return VideoJob{}, ErrNoAvailableAccount
 	}
-	job, err := client.StartVideoJob(prompt, model, aspect)
+	job, err := client.StartVideoJob(prompt, model, images, aspect)
 	if err != nil {
 		return VideoJob{}, err
 	}

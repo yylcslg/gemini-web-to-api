@@ -74,7 +74,7 @@ func TestOpenAIToolBridgeParsing(t *testing.T) {
 func newVideoTestApp(t *testing.T, release chan struct{}) *fiber.App {
 	t.Helper()
 	client := providers.NewVideoTestClient([]providers.ModelInfo{{ID: "gemini-pro"}},
-		func(ctx context.Context, prompt, model string, aspect providers.VideoAspectRatio) (*providers.VideoResult, error) {
+		func(ctx context.Context, prompt, model string, images []string, aspect providers.VideoAspectRatio) (*providers.VideoResult, error) {
 			<-release
 			return &providers.VideoResult{Video: providers.Video{MimeType: "video/mp4", Width: 1280, Height: 720, Duration: 9.99},
 				Data: []byte("mp4-bytes"), ConversationID: "c_test", Model: model}, nil
