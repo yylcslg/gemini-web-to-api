@@ -12,6 +12,8 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -77,6 +79,7 @@ type Video struct {
 // VideoResult is a completed and downloaded video generation.
 type VideoResult struct {
 	Video          Video
+	FilePath       string
 	Data           []byte
 	ConversationID string
 	Model          string
@@ -366,7 +369,7 @@ func (c *Client) GenerateVideo(ctx context.Context, prompt, model string, images
 	c.mu.RUnlock()
 	data, err := c.downloadGeneratedVideo(ctx, withAuthUser(result.Video.URL, authUser), cookieHeader)
 	if err != nil {
-		return nil, &VideoError{Code: VideoErrorDownload, Message: "Generated video could not be downloaded: " + err.Error() +
+		return nil, &VideoError{Code: VideoErrorDownload, Message: "Generated video could not be downloaded: " + safeProviderMessage(err.Error()) +
 			"; it is still available in Gemini Web conversation " + result.ConversationID}
 	}
 	result.Data = data
@@ -568,6 +571,15 @@ func (c *Client) downloadGeneratedVideo(ctx context.Context, rawURL, cookieHeade
 	}
 	client := generatedImageHTTPClient(cookieHeader)
 	client.Timeout = generatedVideoDownloadTime
+	if c.proxyURL != "" {
+		proxyURL, err := url.Parse(c.proxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Gemini proxy URL: %w", err)
+		}
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.Proxy = http.ProxyURL(proxyURL)
+		client.Transport = transport
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
@@ -716,6 +728,7 @@ type VideoJob struct {
 	CompletedAt    time.Time
 	ConversationID string
 	Video          Video
+	FilePath       string
 	Bytes          int
 	Message        string
 	Error          *VideoError
@@ -895,6 +908,24 @@ func (s *videoJobStore) run(id, prompt, model string, images []string, aspect Vi
 			}
 		}()
 		result, err = s.generate(ctx, prompt, model, images, aspect)
+		if err == nil && result == nil {
+			err = errors.New("video generator returned no result")
+		}
+		if err == nil {
+			videoDir := filepath.Join("data", "videos", time.Now().Format("20060102"))
+			if err = os.MkdirAll(videoDir, 0755); err == nil {
+				filePath := filepath.Join(videoDir, "video_"+id+".mp4")
+				err = os.WriteFile(filePath, result.Data, 0644)
+				if err == nil {
+					result.FilePath = filePath
+				}
+			} else {
+				err = fmt.Errorf("save generated video directory: %w", err)
+			}
+			if err != nil {
+				result = nil
+			}
+		}
 	}()
 
 	s.mu.Lock()
@@ -917,6 +948,7 @@ func (s *videoJobStore) run(id, prompt, model string, images []string, aspect Vi
 		return
 	}
 	entry.data = result.Data
+	job.FilePath = result.FilePath
 	job.Status = VideoJobCompleted
 	job.ConversationID = result.ConversationID
 	job.Video = result.Video
@@ -949,7 +981,15 @@ func (s *videoJobStore) content(id string) (VideoJob, []byte, error) {
 	if entry.job.Status != VideoJobCompleted {
 		return entry.job, nil, ErrVideoNotReady
 	}
-	return entry.job, entry.data, nil
+	data := entry.data
+	if entry.job.FilePath != "" {
+		var err error
+		data, err = os.ReadFile(entry.job.FilePath)
+		if err != nil {
+			return entry.job, nil, err
+		}
+	}
+	return entry.job, data, nil
 }
 
 func (s *videoJobStore) list() []VideoJob {
@@ -974,6 +1014,11 @@ func (s *videoJobStore) delete(id string) error {
 	if entry.job.Status == VideoJobInProgress {
 		return ErrVideoNotReady
 	}
+	if entry.job.FilePath != "" {
+		if err := os.Remove(entry.job.FilePath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
 	delete(s.jobs, id)
 	return nil
 }
@@ -987,6 +1032,11 @@ func (s *videoJobStore) close() {
 func (s *videoJobStore) pruneLocked(now time.Time) {
 	for id, entry := range s.jobs {
 		if expires := entry.job.ExpiresAt(); !expires.IsZero() && now.After(expires) {
+			if entry.job.FilePath != "" {
+				if err := os.Remove(entry.job.FilePath); err != nil && !os.IsNotExist(err) {
+					continue
+				}
+			}
 			delete(s.jobs, id)
 		}
 	}
@@ -1003,6 +1053,11 @@ func (s *videoJobStore) pruneLocked(now time.Time) {
 		}
 		if oldestID == "" {
 			return
+		}
+		if filePath := s.jobs[oldestID].job.FilePath; filePath != "" {
+			if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+				return
+			}
 		}
 		delete(s.jobs, oldestID)
 	}

@@ -376,6 +376,61 @@ func imagePathSegment(raw string) (string, bool) {
 	return segment, true
 }
 
+func (h *OpenAIController) HandleGetVideoFile(c fiber.Ctx) error {
+	dateParam, idParam := c.Params("date"), c.Params("id")
+	h.log.Info("video file request received", zap.String("method", c.Method()), zap.String("date", dateParam), zap.String("id", idParam))
+
+	date, ok := imagePathSegment(dateParam)
+	if !ok || len(date) != 8 {
+		h.log.Info("video file request rejected: invalid date", zap.String("date", dateParam))
+		return c.SendStatus(fiber.StatusBadRequest)
+	}
+	id, ok := imagePathSegment(idParam)
+	if !ok {
+		h.log.Info("video file request rejected: invalid file name", zap.String("id", idParam))
+		return c.SendStatus(fiber.StatusBadRequest)
+	}
+	if filepath.Ext(id) != ".mp4" {
+		h.log.Info("video file request rejected: unsupported extension", zap.String("id", id))
+		return c.SendStatus(fiber.StatusBadRequest)
+	}
+	filePath := filepath.Join("data", "videos", date, id)
+	h.log.Info("opening video file", zap.String("path", filePath))
+	file, err := os.Open(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			h.log.Info("video file not found", zap.String("path", filePath))
+			return c.SendStatus(fiber.StatusNotFound)
+		}
+		h.log.Info("failed to open video file", zap.String("path", filePath), zap.Error(err))
+		return err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		h.log.Info("failed to stat video file", zap.String("path", filePath), zap.Error(err))
+		return err
+	}
+	h.log.Info("video file opened", zap.String("path", filePath), zap.Int64("size_bytes", info.Size()))
+	if c.Method() == fiber.MethodHead {
+		_ = file.Close()
+		c.Set(fiber.HeaderContentType, "video/mp4")
+		c.Set(fiber.HeaderContentLength, fmt.Sprintf("%d", info.Size()))
+		h.log.Info("video HEAD request completed", zap.String("path", filePath))
+		return c.SendStatus(fiber.StatusOK)
+	}
+	data, err := os.ReadFile(filePath)
+	_ = file.Close()
+	if err != nil {
+		h.log.Info("failed to read video file", zap.String("path", filePath), zap.Error(err))
+		return err
+	}
+	h.log.Info("video file read into response", zap.String("path", filePath), zap.Int("size_bytes", len(data)))
+	c.Set(fiber.HeaderContentType, "video/mp4")
+	c.Set(fiber.HeaderContentLength, fmt.Sprintf("%d", len(data)))
+	return c.Send(data)
+}
+
 func (h *OpenAIController) HandleGetImage(c fiber.Ctx) error {
 	id, ok := imagePathSegment(c.Params("id"))
 	if !ok {

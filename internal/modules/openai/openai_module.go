@@ -18,6 +18,8 @@ func RegisterRoutes(app *fiber.App, c *OpenAIController) {
 	app.Head("/data/images/:id", c.HandleGetImage)
 	app.Get("/data/images/:date/:id", c.HandleGetImage)
 	app.Head("/data/images/:date/:id", c.HandleGetImage)
+	app.Get("/data/videos/:date/:id", c.HandleGetVideoFile)
+	app.Head("/data/videos/:date/:id", c.HandleGetVideoFile)
 	openaiV1 := app.Group("/v1")
 	c.Register(openaiV1)
 }

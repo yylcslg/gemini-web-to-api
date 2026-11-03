@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"gemini-web-to-api/internal/commons/configs"
 	"gemini-web-to-api/internal/commons/models"
 	"gemini-web-to-api/internal/commons/utils"
 	"gemini-web-to-api/internal/modules/openai/dto"
@@ -22,15 +25,35 @@ import (
 var imagePlaceholderRegex = regexp.MustCompile(`(?i)https?://googleusercontent\.com/image_generation_content/\d+`)
 
 type OpenAIService struct {
-	client *providers.AccountPool
-	log    *zap.Logger
+	client  *providers.AccountPool
+	log     *zap.Logger
+	baseURL string
 }
 
-func NewOpenAIService(client *providers.AccountPool, log *zap.Logger) *OpenAIService {
+func NewOpenAIService(client *providers.AccountPool, log *zap.Logger, cfg *configs.Config) *OpenAIService {
 	return &OpenAIService{
-		client: client,
-		log:    log,
+		client:  client,
+		log:     log,
+		baseURL: publicBaseURL(cfg),
 	}
+}
+
+func publicBaseURL(cfg *configs.Config) string {
+	if base := strings.TrimRight(strings.TrimSpace(cfg.Server.BaseURL), "/"); base != "" {
+		return base
+	}
+	ip := "127.0.0.1"
+	if conn, err := net.Dial("udp", "8.8.8.8:80"); err == nil {
+		if addr, ok := conn.LocalAddr().(*net.UDPAddr); ok && addr.IP != nil {
+			ip = addr.IP.String()
+		}
+		_ = conn.Close()
+	}
+	port := cfg.Server.Port
+	if port == 0 {
+		port = 4981
+	}
+	return "http://" + net.JoinHostPort(ip, strconv.Itoa(port))
 }
 
 func (s *OpenAIService) ListModels() []providers.ModelInfo {
@@ -296,7 +319,7 @@ func (s *OpenAIService) CreateVideo(req dto.VideoGenerationRequest) (*dto.Video,
 	if err != nil {
 		return nil, err
 	}
-	return toOpenAIVideo(job, time.Now()), nil
+	return s.toOpenAIVideo(job, time.Now()), nil
 }
 
 // GetVideo returns a video job by OpenAI ID.
@@ -305,7 +328,7 @@ func (s *OpenAIService) GetVideo(id string) (*dto.Video, error) {
 	if err != nil {
 		return nil, err
 	}
-	return toOpenAIVideo(job, time.Now()), nil
+	return s.toOpenAIVideo(job, time.Now()), nil
 }
 
 // ListVideos returns retained video jobs, newest first.
@@ -313,7 +336,7 @@ func (s *OpenAIService) ListVideos() *dto.VideoList {
 	now := time.Now()
 	list := &dto.VideoList{Object: "list", Data: []dto.Video{}}
 	for _, job := range s.client.ListVideoJobs() {
-		list.Data = append(list.Data, *toOpenAIVideo(job, now))
+		list.Data = append(list.Data, *s.toOpenAIVideo(job, now))
 	}
 	if n := len(list.Data); n > 0 {
 		list.FirstID, list.LastID = &list.Data[0].ID, &list.Data[n-1].ID
@@ -342,7 +365,7 @@ func (s *OpenAIService) VideoContent(id string) ([]byte, string, error) {
 	return data, mimeType, nil
 }
 
-func toOpenAIVideo(job providers.VideoJob, now time.Time) *dto.Video {
+func (s *OpenAIService) toOpenAIVideo(job providers.VideoJob, now time.Time) *dto.Video {
 	id := openAIVideoIDPrefix + job.ID
 	video := &dto.Video{
 		ID:             id,
@@ -364,7 +387,7 @@ func toOpenAIVideo(job providers.VideoJob, now time.Time) *dto.Video {
 		video.Progress = min(95, int(now.Sub(job.CreatedAt).Seconds()*100/expectedVideoSeconds))
 	case providers.VideoJobCompleted:
 		video.Progress = 100
-		video.ContentURL = "/v1/videos/" + id + "/content"
+		video.ContentURL = s.baseURL + "/data/videos/" + job.CompletedAt.Format("20060102") + "/" + filepath.Base(job.FilePath)
 	}
 	if !job.CompletedAt.IsZero() {
 		completed, expires := job.CompletedAt.Unix(), job.ExpiresAt().Unix()
