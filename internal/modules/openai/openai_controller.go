@@ -517,6 +517,6 @@ func (c *OpenAIController) Register(group fiber.Router) {
 	group.Get("/videos", c.HandleListVideos)
 	group.Get("/videos/:id", c.HandleGetVideo)
 	group.Delete("/videos/:id", c.HandleDeleteVideo)
-	group.Get("/videos/:id/content", c.HandleVideoContent)
+	//group.Get("/videos/:id/content", c.HandleVideoContent)
 	group.Post("/addAccount", c.HandleAddAccount)
 }

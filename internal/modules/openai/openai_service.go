@@ -374,7 +374,7 @@ func (s *OpenAIService) toOpenAIVideo(job providers.VideoJob, now time.Time) *dt
 		Status:         job.Status,
 		CreatedAt:      job.CreatedAt.Unix(),
 		Prompt:         job.Prompt,
-		Seconds:        "8",
+		Seconds:        "10",
 		Size:           job.Size(),
 		ConversationID: job.ConversationID,
 		Message:        job.Message,
